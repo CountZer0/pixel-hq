@@ -439,7 +439,8 @@ export default class Agents extends View {
     const key = String(ag?.program?.key ?? "").toLowerCase();
     const argv = key.includes("codex") ? ["codex"] : key.includes("opencode") ? ["opencode"] : (key.includes("antigravity") || key === "agy") ? ["agy"] : ["claude"];
     this.update = null;
-    run("tab.new", { name: "update Pixel HQ", folder: appHome(), argv, task: UPDATE_PROMPT, space: sp?.id });
+    const folder = sp?.machine ? undefined : appHome();
+    run("tab.new", { name: "update Pixel HQ", folder, argv, task: UPDATE_PROMPT, space: sp?.id });
     cx.notify();
   }
 
