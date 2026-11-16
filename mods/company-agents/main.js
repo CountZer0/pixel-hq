@@ -8,7 +8,7 @@ import { figureFor, load } from "./figures.js";
 import { agentOf, speciesOf, duckWidth, DUCK_CENTER, IDLE_SNOOZE, IDLE_URGE } from "./duck.js";
 import { scene, yHorizon } from "./scene.js";
 import { Editor } from "./editor.js";
-import { snapshot, clashes, hire } from "./crew.js";
+import { snapshot, clashes, hire, agentTaskArgv } from "./crew.js";
 
 // The figure editor, as a dialog; `space` opens it on that space's pick.
 const openFigures = (space) => openOverlay({ mod: "company-agents", kind: "dialog", width: 860, height: 640, props: { figures: true, ...(space ? { space } : {}) } });
@@ -442,7 +442,8 @@ export default class Agents extends View {
     const runningKey = agents().find((a) => a.program?.key)?.program?.key?.toLowerCase();
     const runningMatched = installed.find((a) => a.key?.toLowerCase() === runningKey || runningKey?.includes(a.key?.toLowerCase()));
     const pick = matched ?? runningMatched ?? installed[0];
-    const argv = pick?.run ?? (deskKey.includes("codex") ? ["codex"] : deskKey.includes("opencode") ? ["opencode"] : (deskKey.includes("antigravity") || deskKey.includes("agy")) ? ["agy"] : ["claude"]);
+    const baseArgv = pick?.run ?? (deskKey.includes("codex") ? ["codex"] : deskKey.includes("opencode") ? ["opencode"] : (deskKey.includes("antigravity") || deskKey.includes("agy")) ? ["agy"] : ["claude"]);
+    const argv = agentTaskArgv(baseArgv, pick?.key ?? deskKey);
     const folder = sp?.machine ? sp.folder || undefined : appHome();
     run("tab.new", { name: "update Pixel HQ", folder, argv, task: UPDATE_PROMPT, space: sp?.id });
     cx.notify();
