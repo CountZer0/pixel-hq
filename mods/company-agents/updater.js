@@ -1,6 +1,6 @@
 import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { theme, run, appHome, writeTextFile, closeOverlay, props, spaces, agents, focused, knownAgents } from "herdr";
+import { theme, run, appHome, readTextFile, writeTextFile, closeOverlay, props, spaces, agents, focused, knownAgents } from "herdr";
 import { agentTaskArgv } from "./crew.js";
 
 const UPDATE_PROMPT = "Read ~/.config/herdr-app/AGENTS.md, then update my Pixel HQ layout to the latest version from github.com/bnhan2710/pixel-hq. Overwriting my installed pixel-hq files is intended; keep my other layouts and mods.";
@@ -80,11 +80,14 @@ export class Updater {
       }
 
       fileList.sort((a, b) => {
-        if (a.includes("company-agents/main.js")) return 1;
-        if (b.includes("company-agents/main.js")) return -1;
-        if (a.includes("company-agents/version.json")) return 1;
-        if (b.includes("company-agents/version.json")) return -1;
-        return a.localeCompare(b);
+        const order = (f) => {
+          if (f.includes("company-agents/main.js")) return 4;
+          if (f.includes("company-agents/updater.js")) return 3;
+          if (f.includes("company-agents/version.json")) return 2;
+          if (f.includes("layouts/pixel-hq.json")) return 1;
+          return 0;
+        };
+        return order(a) - order(b) || a.localeCompare(b);
       });
 
       this.total = fileList.length;
@@ -101,7 +104,11 @@ export class Updater {
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status} while fetching ${p}`);
         const content = await res.text();
-        await writeTextFile(`${appHome()}/${p}`, content, null);
+        const targetPath = `${appHome()}/${p}`;
+        const current = await readTextFile(targetPath).catch(() => null);
+        if (current !== content) {
+          await writeTextFile(targetPath, content, current);
+        }
       }
 
       this.status = "done";
@@ -159,7 +166,20 @@ export class Updater {
     const bc = this.status === "error" ? "#ff5370" : this.status === "done" ? "#a6e3a1" : "#89b4fa";
     const pct = this.total > 0 ? Math.min(100, Math.round((this.step * 100) / this.total)) : 0;
     const button = (id, label, bg, fg, onClick) =>
-      h_flex().id(id).h(28).px(12).items_center().rounded(6).border_1().border_color(bg).bg(bg).text_color(fg).cursor_pointer().hover((s) => s.opacity(0.88)).on_click(onClick).child(label);
+      h_flex()
+        .id(id)
+        .h(28)
+        .px(12)
+        .items_center()
+        .rounded(6)
+        .border_1()
+        .border_color(bg)
+        .bg(bg)
+        .text_color(fg)
+        .cursor_pointer()
+        .hover((s) => s.opacity(0.88))
+        .on_click((_e, cx) => onClick(cx))
+        .child(label);
 
     return v_flex()
       .id("pixel-hq-updater")
@@ -212,8 +232,8 @@ export class Updater {
       .child(
         h_flex().justify_end().gap(8).text_size(11).font_family(mono).font_bold()
           .when(this.status === "error", (el) => el
-            .child(button("upd-retry", "Retry Auto-Update", "#89b4fa", "#11111b", () => this.doAutoUpdate(cx)))
-            .child(button("upd-agent", "Use Agent Tab", "#313244", "#cdd6f4", () => this.doAgentUpdate(cx)))
+            .child(button("upd-retry", "Retry Auto-Update", "#89b4fa", "#11111b", (cx) => cx.spawn(async (cx) => this.doAutoUpdate(cx))))
+            .child(button("upd-agent", "Use Agent Tab", "#313244", "#cdd6f4", (cx) => cx.spawn(async (cx) => this.doAgentUpdate(cx))))
             .child(button("upd-close", "Close", "#181825", "#7f849c", () => closeOverlay(this.overlay))))
           .when(this.status === "done", (el) => el
             .child(button("upd-reload", "Reload Layout", "#a6e3a1", "#11111b", () => {
