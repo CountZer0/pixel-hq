@@ -3,12 +3,13 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, appHome, exec, readTextFile, nextCommand, hc } from "herdr";
+import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, appHome, exec, readTextFile, writeTextFile, nextCommand, hc, knownAgents } from "herdr";
 import { figureFor, load } from "./figures.js";
 import { agentOf, speciesOf, duckWidth, DUCK_CENTER, IDLE_SNOOZE, IDLE_URGE } from "./duck.js";
 import { scene, yHorizon } from "./scene.js";
 import { Editor } from "./editor.js";
-import { snapshot, clashes, hire } from "./crew.js";
+import { Updater } from "./updater.js";
+import { snapshot, clashes, hire, agentTaskArgv } from "./crew.js";
 
 // The figure editor, as a dialog; `space` opens it on that space's pick.
 const openFigures = (space) => openOverlay({ mod: "company-agents", kind: "dialog", width: 860, height: 640, props: { figures: true, ...(space ? { space } : {}) } });
@@ -88,9 +89,6 @@ function contextBar(t, pct, model, address) {
     .when(Boolean(model), el => el.child(div().min_w(0).truncate().text_size(10).text_color(t.muted).child(`· ${model}`)));
 }
 
-// What the Update button hands to an agent.
-const UPDATE_PROMPT = "Read ~/.config/herdr-app/AGENTS.md, then update my Pixel HQ layout to the latest version from herdr.dev/layouts/bnhan2710/pixel-hq. Overwriting my installed pixel-hq files is intended; keep my other layouts and mods.";
-
 // Finds a Codex terminal's session file (the one its process, or a child of it, has open; else the newest recent one that began in the
 // same folder) and prints its last token_count event, whose last_token_usage and model_context_window say how full the context is.
 const CODEX_SH = `home="\${CODEX_HOME:-$HOME/.codex}/sessions"
@@ -125,6 +123,7 @@ export default class Agents extends View {
   init(_props, cx) {
     if (props()?.sortMenu) return;
     if (props()?.figures) { this.editor = new Editor(cx); return; }
+    if (props()?.updateModal) { this.updater = new Updater(cx); return; }
     // Figure sets come from ~/.config/herdr-app/pond-agents.json; hand edits show within seconds.
     this.file = {};
     const reload = (cx) => cx.spawn(async (cx) => {
@@ -163,7 +162,7 @@ export default class Agents extends View {
     this.scanCodex(cx);
     cx.timer.every(8000, (cx) => this.scanCodex(cx));
     // `company-agents.hire` (a key binding, or herdr-app do) opens the hire form.
-    cx.spawn(async (cx) => { for (;;) { const c = await nextCommand(); if (c === "hire") this.openHire(cx); if (c === "update") this.runUpdate(cx); } });
+    cx.spawn(async (cx) => { for (;;) { const c = await nextCommand(); if (c === "hire") this.openHire(cx); if (c === "update") this.runUpdate(); } });
     // OpenCode 1.x does not report a status by itself, so without help it never gets a desk. Once, if OpenCode is installed, drop its
     // status plugin (this mod's opencode-status.js) into OpenCode's plugins folder. Only ever replaces Pixel HQ's own older copy;
     // deleting the file removes it for good.
@@ -428,19 +427,21 @@ export default class Agents extends View {
     cx.notify();
   }
 
-  // The Update button: opens a new tab in the shown space with an agent (the one you are in, else Claude) that starts on the update prompt.
-  runUpdate(cx) {
-    // Once per click: every copy of this mod hears the same command, and a double click must not open two agents.
+  runUpdate() {
     if (Date.now() - Number(shared("pixel-hq.update-at") ?? 0) < 5000) return;
     setShared("pixel-hq.update-at", Date.now());
-    const sp = spaces().find((x) => x.active);
-    const here = agents().find((a) => a.address === focused()?.agent);
-    const ag = here ?? agents().find((a) => a.program?.key);
-    const key = String(ag?.program?.key ?? "").toLowerCase();
-    const argv = key.includes("codex") ? ["codex"] : key.includes("opencode") ? ["opencode"] : (key.includes("antigravity") || key === "agy") ? ["agy"] : ["claude"];
-    this.update = null;
-    run("tab.new", { name: "update Pixel HQ", folder: appHome(), argv, task: UPDATE_PROMPT, space: sp?.id });
-    cx.notify();
+    openOverlay({
+      mod: "company-agents",
+      kind: "dialog",
+      modal: true,
+      width: 480,
+      height: 240,
+      props: {
+        updateModal: true,
+        version: this.update?.version,
+        notes: this.update?.notes,
+      },
+    });
   }
 
   // The paper pile on a desk: the first click arms it, the second (within 6 s) sends the agent /compact (which already summarizes).
@@ -472,11 +473,17 @@ export default class Agents extends View {
       const num = (v) => String(v).split(".").map((n) => parseInt(n, 10) || 0);
       const [a, b] = [num(latest.version), num(mine.version)];
       const newer = [0, 1, 2].map((i) => (a[i] ?? 0) - (b[i] ?? 0)).find((d) => d !== 0) > 0;
-      if (!newer) {
-        if (mine?.version) localStorage.setItem("upd-dismissed", String(mine.version));
+      if (!newer || (shared("pixel-hq.dismissed-version") || localStorage.getItem("upd-dismissed")) === String(latest.version)) {
+        if (mine?.version) {
+          localStorage.setItem("upd-dismissed", String(mine.version));
+          setShared("pixel-hq.dismissed-version", String(mine.version));
+        }
+        if (this.update) {
+          this.update = null;
+          cx.notify();
+        }
         return;
       }
-      if (localStorage.getItem("upd-dismissed") === String(latest.version)) return;
       this.update = { version: String(latest.version), notes: latest.notes ? String(latest.notes) : "" };
       cx.notify();
     } catch { /* offline, no version.json, or not valid: stay quiet */ }
@@ -510,6 +517,11 @@ export default class Agents extends View {
     const t = theme();
     if (props()?.sortMenu) return this.sortMenu(t);
     if (this.editor) return this.editor.render(cx);
+    if (this.updater) return this.updater.render(cx);
+    const dismissed = shared("pixel-hq.dismissed-version") || localStorage.getItem("upd-dismissed");
+    if (this.update && dismissed === String(this.update.version)) {
+      this.update = null;
+    }
     const collapsed = narrow();
     const sort = sortOf();
     let list = agents();
@@ -917,8 +929,13 @@ export default class Agents extends View {
         return el.child(this.update
           ? box.child(div().child(`Pixel HQ ${this.update.version} is out${this.update.notes ? ` · ${this.update.notes}` : ""}`))
             .child(h_flex().gap(6)
-              .child(btn("upd-go", "Update now", "#89b4fa", "#11111b", (_e, cx) => this.runUpdate(cx)))
-              .child(btn("upd-later", "Later", "#313244", "#cdd6f4", (_e, cx) => { localStorage.setItem("upd-dismissed", this.update.version); this.update = null; cx.notify(); })))
+              .child(btn("upd-go", "Update now", "#89b4fa", "#11111b", () => this.runUpdate()))
+              .child(btn("upd-later", "Later", "#313244", "#cdd6f4", (_e, cx) => {
+                localStorage.setItem("upd-dismissed", this.update.version);
+                setShared("pixel-hq.dismissed-version", this.update.version);
+                this.update = null;
+                cx.notify();
+              })))
           : box.cursor_pointer().on_click((_e, cx) => { this.notice = null; cx.notify(); }).child(this.notice));
       })
       .when(hidden > 0, (el) => el.child(div().absolute().right(8).top(horizon + 6).px(8).py(3).rounded(8).bg("#11111bdd").border_1().border_color("#45475a").text_size(11).text_color("#cdd6f4").child(`+${hidden} more · narrow the panel to list all`)))
