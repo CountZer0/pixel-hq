@@ -435,9 +435,9 @@ export default class Agents extends View {
     setShared("pixel-hq.update-at", Date.now());
     const sp = spaces().find((x) => x.active);
     const here = agents().find((a) => a.address === focused()?.agent);
-    const key = String(here?.program?.key ?? "").toLowerCase();
+    const ag = here ?? agents().find((a) => a.program?.key);
+    const key = String(ag?.program?.key ?? "").toLowerCase();
     const argv = key.includes("codex") ? ["codex"] : key.includes("opencode") ? ["opencode"] : (key.includes("antigravity") || key === "agy") ? ["agy"] : ["claude"];
-    if (this.update) localStorage.setItem("upd-dismissed", this.update.version);
     this.update = null;
     run("tab.new", { name: "update Pixel HQ", folder: appHome(), argv, task: UPDATE_PROMPT, space: sp?.id });
     cx.notify();
@@ -472,7 +472,11 @@ export default class Agents extends View {
       const num = (v) => String(v).split(".").map((n) => parseInt(n, 10) || 0);
       const [a, b] = [num(latest.version), num(mine.version)];
       const newer = [0, 1, 2].map((i) => (a[i] ?? 0) - (b[i] ?? 0)).find((d) => d !== 0) > 0;
-      if (!newer || localStorage.getItem("upd-dismissed") === String(latest.version)) return;
+      if (!newer) {
+        if (mine?.version) localStorage.setItem("upd-dismissed", String(mine.version));
+        return;
+      }
+      if (localStorage.getItem("upd-dismissed") === String(latest.version)) return;
       this.update = { version: String(latest.version), notes: latest.notes ? String(latest.notes) : "" };
       cx.notify();
     } catch { /* offline, no version.json, or not valid: stay quiet */ }
