@@ -1,6 +1,6 @@
 import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { theme, run, appHome, readTextFile, writeTextFile, closeOverlay, props, spaces, agents, focused, knownAgents } from "herdr";
+import { theme, run, appHome, readTextFile, writeTextFile, closeOverlay, props, spaces, agents, focused, knownAgents, shared, setShared } from "herdr";
 import { agentTaskArgv } from "./crew.js";
 
 const UPDATE_PROMPT = "Read ~/.config/herdr-app/AGENTS.md, then update my Pixel HQ layout to the latest version from github.com/bnhan2710/pixel-hq. Overwriting my installed pixel-hq files is intended; keep my other layouts and mods.";
@@ -92,6 +92,7 @@ export class Updater {
 
       this.total = fileList.length;
       this.step = 0;
+      let updatedCount = 0;
       cx.notify();
 
       for (let i = 0; i < fileList.length; i++) {
@@ -102,18 +103,23 @@ export class Updater {
 
         const url = `https://raw.githubusercontent.com/bnhan2710/pixel-hq/main/${p}?t=${Date.now()}`;
         const res = await fetch(url);
+        if (res.status === 404) continue;
         if (!res.ok) throw new Error(`HTTP ${res.status} while fetching ${p}`);
         const content = await res.text();
         const targetPath = `${appHome()}/${p}`;
         const current = await readTextFile(targetPath).catch(() => null);
         if (current !== content) {
           await writeTextFile(targetPath, content, current);
+          updatedCount++;
         }
       }
 
       this.status = "done";
-      this.message = `Successfully updated to v${this.version}!`;
-      if (this.version) localStorage.setItem("upd-dismissed", String(this.version));
+      this.message = updatedCount > 0 ? `Successfully updated to v${this.version}!` : `Pixel HQ is already up to date (v${this.version}).`;
+      if (this.version) {
+        localStorage.setItem("upd-dismissed", String(this.version));
+        setShared("pixel-hq.dismissed-version", String(this.version));
+      }
     } catch (err) {
       this.status = "error";
       this.error = String(err?.message ?? err);
@@ -151,6 +157,10 @@ export class Updater {
 
       this.status = "done";
       this.message = `Update session started with ${pick?.name || deskKey || "agent"}! Track progress in the new tab.`;
+      if (this.version) {
+        localStorage.setItem("upd-dismissed", String(this.version));
+        setShared("pixel-hq.dismissed-version", String(this.version));
+      }
     } catch (err) {
       this.status = "error";
       this.error = String(err?.message ?? err);
@@ -237,10 +247,20 @@ export class Updater {
             .child(button("upd-close", "Close", "#181825", "#7f849c", () => closeOverlay(this.overlay))))
           .when(this.status === "done", (el) => el
             .child(button("upd-reload", "Reload Layout", "#a6e3a1", "#11111b", () => {
+              if (this.version) {
+                localStorage.setItem("upd-dismissed", String(this.version));
+                setShared("pixel-hq.dismissed-version", String(this.version));
+              }
               closeOverlay(this.overlay);
               run("layout.switch", { name: "pixel-hq" });
             }))
-            .child(button("upd-done", "Done", "#313244", "#cdd6f4", () => closeOverlay(this.overlay))))
+            .child(button("upd-done", "Done", "#313244", "#cdd6f4", () => {
+              if (this.version) {
+                localStorage.setItem("upd-dismissed", String(this.version));
+                setShared("pixel-hq.dismissed-version", String(this.version));
+              }
+              closeOverlay(this.overlay);
+            })))
           .when(this.status === "updating", (el) => el
             .child(div().text_size(10.5).text_color("#7f849c").child("Please wait while updating files...")))
       );

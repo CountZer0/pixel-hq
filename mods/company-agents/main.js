@@ -473,11 +473,17 @@ export default class Agents extends View {
       const num = (v) => String(v).split(".").map((n) => parseInt(n, 10) || 0);
       const [a, b] = [num(latest.version), num(mine.version)];
       const newer = [0, 1, 2].map((i) => (a[i] ?? 0) - (b[i] ?? 0)).find((d) => d !== 0) > 0;
-      if (!newer) {
-        if (mine?.version) localStorage.setItem("upd-dismissed", String(mine.version));
+      if (!newer || (shared("pixel-hq.dismissed-version") || localStorage.getItem("upd-dismissed")) === String(latest.version)) {
+        if (mine?.version) {
+          localStorage.setItem("upd-dismissed", String(mine.version));
+          setShared("pixel-hq.dismissed-version", String(mine.version));
+        }
+        if (this.update) {
+          this.update = null;
+          cx.notify();
+        }
         return;
       }
-      if (localStorage.getItem("upd-dismissed") === String(latest.version)) return;
       this.update = { version: String(latest.version), notes: latest.notes ? String(latest.notes) : "" };
       cx.notify();
     } catch { /* offline, no version.json, or not valid: stay quiet */ }
@@ -512,6 +518,10 @@ export default class Agents extends View {
     if (props()?.sortMenu) return this.sortMenu(t);
     if (this.editor) return this.editor.render(cx);
     if (this.updater) return this.updater.render(cx);
+    const dismissed = shared("pixel-hq.dismissed-version") || localStorage.getItem("upd-dismissed");
+    if (this.update && dismissed === String(this.update.version)) {
+      this.update = null;
+    }
     const collapsed = narrow();
     const sort = sortOf();
     let list = agents();
@@ -920,7 +930,12 @@ export default class Agents extends View {
           ? box.child(div().child(`Pixel HQ ${this.update.version} is out${this.update.notes ? ` · ${this.update.notes}` : ""}`))
             .child(h_flex().gap(6)
               .child(btn("upd-go", "Update now", "#89b4fa", "#11111b", () => this.runUpdate()))
-              .child(btn("upd-later", "Later", "#313244", "#cdd6f4", (_e, cx) => { localStorage.setItem("upd-dismissed", this.update.version); this.update = null; cx.notify(); })))
+              .child(btn("upd-later", "Later", "#313244", "#cdd6f4", (_e, cx) => {
+                localStorage.setItem("upd-dismissed", this.update.version);
+                setShared("pixel-hq.dismissed-version", this.update.version);
+                this.update = null;
+                cx.notify();
+              })))
           : box.cursor_pointer().on_click((_e, cx) => { this.notice = null; cx.notify(); }).child(this.notice));
       })
       .when(hidden > 0, (el) => el.child(div().absolute().right(8).top(horizon + 6).px(8).py(3).rounded(8).bg("#11111bdd").border_1().border_color("#45475a").text_size(11).text_color("#cdd6f4").child(`+${hidden} more · narrow the panel to list all`)))
