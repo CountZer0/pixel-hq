@@ -3,7 +3,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, appHome, exec, readTextFile, nextCommand, hc } from "herdr";
+import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, appHome, exec, readTextFile, nextCommand, hc, knownAgents } from "herdr";
 import { figureFor, load } from "./figures.js";
 import { agentOf, speciesOf, duckWidth, DUCK_CENTER, IDLE_SNOOZE, IDLE_URGE } from "./duck.js";
 import { scene, yHorizon } from "./scene.js";
@@ -89,7 +89,7 @@ function contextBar(t, pct, model, address) {
 }
 
 // What the Update button hands to an agent.
-const UPDATE_PROMPT = "Read ~/.config/herdr-app/AGENTS.md, then update my Pixel HQ layout to the latest version from herdr.dev/layouts/bnhan2710/pixel-hq. Overwriting my installed pixel-hq files is intended; keep my other layouts and mods.";
+const UPDATE_PROMPT = "Read ~/.config/herdr-app/AGENTS.md, then update my Pixel HQ layout to the latest version from github.com/bnhan2710/pixel-hq. Overwriting my installed pixel-hq files is intended; keep my other layouts and mods.";
 
 // Finds a Codex terminal's session file (the one its process, or a child of it, has open; else the newest recent one that began in the
 // same folder) and prints its last token_count event, whose last_token_usage and model_context_window say how full the context is.
@@ -429,17 +429,21 @@ export default class Agents extends View {
   }
 
   // The Update button: opens a new tab in the shown space with an agent (the one you are in, else Claude) that starts on the update prompt.
-  runUpdate(cx) {
+  async runUpdate(cx) {
     // Once per click: every copy of this mod hears the same command, and a double click must not open two agents.
     if (Date.now() - Number(shared("pixel-hq.update-at") ?? 0) < 5000) return;
     setShared("pixel-hq.update-at", Date.now());
-    const sp = spaces().find((x) => x.active);
-    const here = agents().find((a) => a.address === focused()?.agent);
-    const ag = here ?? agents().find((a) => a.program?.key);
-    const key = String(ag?.program?.key ?? "").toLowerCase();
-    const argv = key.includes("codex") ? ["codex"] : key.includes("opencode") ? ["opencode"] : (key.includes("antigravity") || key === "agy") ? ["agy"] : ["claude"];
     this.update = null;
-    const folder = sp?.machine ? undefined : appHome();
+    const sp = spaces().find((x) => x.active);
+    const installed = (await knownAgents({ on: sp?.machine ?? undefined }).catch(() => [])).filter((a) => a.installed);
+    const here = agents().find((a) => a.address === focused()?.agent);
+    const deskKey = String(here?.program?.key ?? "").toLowerCase();
+    const matched = installed.find((a) => a.key?.toLowerCase() === deskKey || deskKey.includes(a.key?.toLowerCase()));
+    const runningKey = agents().find((a) => a.program?.key)?.program?.key?.toLowerCase();
+    const runningMatched = installed.find((a) => a.key?.toLowerCase() === runningKey || runningKey?.includes(a.key?.toLowerCase()));
+    const pick = matched ?? runningMatched ?? installed[0];
+    const argv = pick?.run ?? (deskKey.includes("codex") ? ["codex"] : deskKey.includes("opencode") ? ["opencode"] : (deskKey.includes("antigravity") || deskKey.includes("agy")) ? ["agy"] : ["claude"]);
+    const folder = sp?.machine ? sp.folder || undefined : appHome();
     run("tab.new", { name: "update Pixel HQ", folder, argv, task: UPDATE_PROMPT, space: sp?.id });
     cx.notify();
   }
