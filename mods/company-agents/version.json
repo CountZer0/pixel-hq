@@ -1,4 +1,4 @@
 {
-  "version": "1.4.0",
-  "notes": "Antigravity paper piles, idle pets doze off and set an alarm, click a long-idle desk to nudge it"
+  "version": "1.4.1",
+  "notes": "Fix update notification dismissal and agent detection on update"
 }
