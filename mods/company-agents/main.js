@@ -8,6 +8,7 @@ import { figureFor, load } from "./figures.js";
 import { agentOf, speciesOf, duckWidth, DUCK_CENTER, IDLE_SNOOZE, IDLE_URGE } from "./duck.js";
 import { scene, yHorizon } from "./scene.js";
 import { Editor } from "./editor.js";
+import { Updater } from "./updater.js";
 import { snapshot, clashes, hire, agentTaskArgv } from "./crew.js";
 
 // The figure editor, as a dialog; `space` opens it on that space's pick.
@@ -88,43 +89,6 @@ function contextBar(t, pct, model, address) {
     .when(Boolean(model), el => el.child(div().min_w(0).truncate().text_size(10).text_color(t.muted).child(`· ${model}`)));
 }
 
-// What the Update button hands to an agent.
-const UPDATE_PROMPT = "Read ~/.config/herdr-app/AGENTS.md, then update my Pixel HQ layout to the latest version from github.com/bnhan2710/pixel-hq. Overwriting my installed pixel-hq files is intended; keep my other layouts and mods.";
-
-const PIXEL_HQ_FILES = [
-  "layouts/pixel-hq.json",
-  "themes/pixel-hq.json",
-  "mods/company-brand/main.js",
-  "mods/company-brand/mod.json",
-  "mods/company-brand/search.svg",
-  "mods/company-brand/sidebar.svg",
-  "mods/company-pane/close.svg",
-  "mods/company-pane/duck.js",
-  "mods/company-pane/main.js",
-  "mods/company-pane/mod.json",
-  "mods/company-pane/split-down.svg",
-  "mods/company-pane/split-right.svg",
-  "mods/company-pane/unzoom.svg",
-  "mods/company-pane/zoom.svg",
-  "mods/company-spaces/main.js",
-  "mods/company-spaces/mod.json",
-  "mods/company-status/main.js",
-  "mods/company-status/mod.json",
-  "mods/company-agents/animate.js",
-  "mods/company-agents/claude-statusline.sh",
-  "mods/company-agents/crew.js",
-  "mods/company-agents/duck-icon.svg",
-  "mods/company-agents/duck.js",
-  "mods/company-agents/editor.js",
-  "mods/company-agents/figures.js",
-  "mods/company-agents/opencode-status.js",
-  "mods/company-agents/scene.js",
-  "mods/company-agents/sparkles.svg",
-  "mods/company-agents/mod.json",
-  "mods/company-agents/version.json",
-  "mods/company-agents/main.js",
-];
-
 // Finds a Codex terminal's session file (the one its process, or a child of it, has open; else the newest recent one that began in the
 // same folder) and prints its last token_count event, whose last_token_usage and model_context_window say how full the context is.
 const CODEX_SH = `home="\${CODEX_HOME:-$HOME/.codex}/sessions"
@@ -159,6 +123,7 @@ export default class Agents extends View {
   init(_props, cx) {
     if (props()?.sortMenu) return;
     if (props()?.figures) { this.editor = new Editor(cx); return; }
+    if (props()?.updateModal) { this.updater = new Updater(cx); return; }
     // Figure sets come from ~/.config/herdr-app/pond-agents.json; hand edits show within seconds.
     this.file = {};
     const reload = (cx) => cx.spawn(async (cx) => {
@@ -197,7 +162,7 @@ export default class Agents extends View {
     this.scanCodex(cx);
     cx.timer.every(8000, (cx) => this.scanCodex(cx));
     // `company-agents.hire` (a key binding, or herdr-app do) opens the hire form.
-    cx.spawn(async (cx) => { for (;;) { const c = await nextCommand(); if (c === "hire") this.openHire(cx); if (c === "update") this.openUpdateModal(cx, true); } });
+    cx.spawn(async (cx) => { for (;;) { const c = await nextCommand(); if (c === "hire") this.openHire(cx); if (c === "update") this.runUpdate(); } });
     // OpenCode 1.x does not report a status by itself, so without help it never gets a desk. Once, if OpenCode is installed, drop its
     // status plugin (this mod's opencode-status.js) into OpenCode's plugins folder. Only ever replaces Pixel HQ's own older copy;
     // deleting the file removes it for good.
@@ -206,7 +171,6 @@ export default class Agents extends View {
     // Tell the person when a newer Pixel HQ is out: read the tiny version.json from GitHub at start and every 6 hours.
     // Nothing is sent. Deleting this mod's own version.json turns the check off.
     this.update = null;
-    this.updateModal = { open: false, version: "", notes: "", busy: false, status: "idle", step: 0, total: 0, message: "", error: "" };
     this.checkUpdate(cx);
     cx.timer.every(6 * 3600 * 1000, (cx) => this.checkUpdate(cx));
     // Now and then (every 14 to 32 s) one idle pet steps out beside its desk for about 3.6 s, then comes back.
@@ -463,141 +427,21 @@ export default class Agents extends View {
     cx.notify();
   }
 
-  openUpdateModal(cx, startImmediately = false) {
-    const v = this.update?.version || "latest";
-    const notes = this.update?.notes || "";
-    this.updateModal = {
-      open: true,
-      version: v,
-      notes,
-      busy: false,
-      status: "idle",
-      step: 0,
-      total: 0,
-      message: "Ready to update Pixel HQ files.",
-      error: "",
-    };
-    cx.notify();
-    if (startImmediately) this.doAutoUpdate(cx);
-  }
-
-  closeUpdateModal(cx) {
-    if (this.updateModal) {
-      this.updateModal.open = false;
-      this.updateModal.busy = false;
-    }
-    cx.notify();
-  }
-
-  async doAutoUpdate(cx) {
-    const m = this.updateModal;
-    if (!m || m.busy) return;
-    m.busy = true;
-    m.status = "updating";
-    m.error = "";
-    m.message = "Contacting GitHub for release files...";
-    cx.notify();
-
-    try {
-      const treeRes = await fetch("https://api.github.com/repos/bnhan2710/pixel-hq/git/trees/main?recursive=1").catch(() => null);
-      let fileList = [];
-      if (treeRes && treeRes.ok) {
-        const treeData = await treeRes.json().catch(() => null);
-        if (Array.isArray(treeData?.tree)) {
-          fileList = treeData.tree
-            .filter((f) => f.type === "blob" && (f.path.startsWith("layouts/") || f.path.startsWith("mods/") || f.path.startsWith("themes/")) && !f.path.endsWith("README.md") && !f.path.endsWith(".png"))
-            .map((f) => f.path);
-        }
-      }
-      if (!fileList.length) {
-        fileList = PIXEL_HQ_FILES.filter((f) => !f.endsWith(".png"));
-      }
-
-      fileList.sort((a, b) => {
-        if (a.includes("company-agents/main.js")) return 1;
-        if (b.includes("company-agents/main.js")) return -1;
-        if (a.includes("company-agents/version.json")) return 1;
-        if (b.includes("company-agents/version.json")) return -1;
-        return a.localeCompare(b);
-      });
-
-      m.total = fileList.length;
-      m.step = 0;
-      cx.notify();
-
-      for (let i = 0; i < fileList.length; i++) {
-        if (!m.open) break;
-        const p = fileList[i];
-        m.step = i + 1;
-        m.message = `[${i + 1}/${fileList.length}] Downloading ${p}...`;
-        cx.notify();
-
-        const url = `https://raw.githubusercontent.com/bnhan2710/pixel-hq/main/${p}?t=${Date.now()}`;
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`HTTP ${res.status} while fetching ${p}`);
-        const content = await res.text();
-        await writeTextFile(`${appHome()}/${p}`, content, null);
-      }
-
-      if (m.open) {
-        m.status = "done";
-        m.message = `Successfully updated to v${m.version}! Herdr will reload files automatically.`;
-        if (m.version) localStorage.setItem("upd-dismissed", String(m.version));
-        this.update = null;
-      }
-    } catch (err) {
-      if (m.open) {
-        m.status = "error";
-        m.error = String(err?.message ?? err);
-        m.message = `Update failed: ${m.error}`;
-      }
-    } finally {
-      m.busy = false;
-      cx.notify();
-    }
-  }
-
-  async doAgentUpdate(cx) {
-    const m = this.updateModal;
-    if (!m || m.busy) return;
-    m.busy = true;
-    m.status = "updating";
-    m.error = "";
-    m.message = "Discovering installed agent runtime...";
-    cx.notify();
-
-    try {
-      const sp = spaces().find((x) => x.active);
-      const installed = (await knownAgents({ on: sp?.machine ?? undefined }).catch(() => [])).filter((a) => a.installed);
-      const here = agents().find((a) => a.address === focused()?.agent);
-      const deskKey = String(here?.program?.key ?? "").toLowerCase();
-      const matched = installed.find((a) => a.key?.toLowerCase() === deskKey || deskKey.includes(a.key?.toLowerCase()));
-      const runningKey = agents().find((a) => a.program?.key)?.program?.key?.toLowerCase();
-      const runningMatched = installed.find((a) => a.key?.toLowerCase() === runningKey || runningKey?.includes(a.key?.toLowerCase()));
-      const pick = matched ?? runningMatched ?? installed[0];
-      const baseArgv = pick?.run ?? (deskKey.includes("codex") ? ["codex"] : deskKey.includes("opencode") ? ["opencode"] : (deskKey.includes("antigravity") || deskKey.includes("agy")) ? ["agy"] : ["claude"]);
-      const argv = agentTaskArgv(baseArgv, pick?.key ?? deskKey);
-      const folder = sp?.machine ? sp.folder || undefined : appHome();
-
-      m.message = `Launching ${pick?.name || deskKey || "agent"} in terminal tab...`;
-      cx.notify();
-
-      run("tab.new", { name: "update Pixel HQ", folder, argv, task: UPDATE_PROMPT, space: sp?.id });
-
-      m.status = "done";
-      m.message = `Update session started with ${pick?.name || deskKey || "agent"}! Track progress in the new tab.`;
-    } catch (err) {
-      m.status = "error";
-      m.error = String(err?.message ?? err);
-      m.message = `Could not launch terminal tab: ${m.error}`;
-    } finally {
-      m.busy = false;
-      cx.notify();
-    }
-  }
-
-  runUpdate(cx) {
-    this.openUpdateModal(cx, true);
+  runUpdate() {
+    if (Date.now() - Number(shared("pixel-hq.update-at") ?? 0) < 5000) return;
+    setShared("pixel-hq.update-at", Date.now());
+    openOverlay({
+      mod: "company-agents",
+      kind: "dialog",
+      modal: true,
+      width: 480,
+      height: 240,
+      props: {
+        updateModal: true,
+        version: this.update?.version,
+        notes: this.update?.notes,
+      },
+    });
   }
 
   // The paper pile on a desk: the first click arms it, the second (within 6 s) sends the agent /compact (which already summarizes).
@@ -667,6 +511,7 @@ export default class Agents extends View {
     const t = theme();
     if (props()?.sortMenu) return this.sortMenu(t);
     if (this.editor) return this.editor.render(cx);
+    if (this.updater) return this.updater.render(cx);
     const collapsed = narrow();
     const sort = sortOf();
     let list = agents();
@@ -1068,45 +913,13 @@ export default class Agents extends View {
       })
       .child(scene(sz.width, sz.height))
       .when(list.length === 0, (el) => el.child(div().absolute().left(12).top(sz.height * 0.5).w(sz.width - 24).px(8).py(6).rounded(3).bg("#0f111acc").text_size(12).text_color("#ffffff").child("No staff on this floor yet. Hire one with the + above, or start an agent in this space.")))
-      .when(Boolean(this.updateModal?.open), (el) => {
-        const m = this.updateModal;
-        const bc = m.status === "error" ? "#ff5370" : m.status === "done" ? "#a6e3a1" : "#89b4fa";
-        const btn = (id, text, fill, ink, act) => div().id(id).px(8).h(22).flex().items_center().cursor_pointer().bg(fill).text_size(10.5).font_family(monoF).font_bold().text_color(ink).on_click(act).child(text);
-        const pct = m.total > 0 ? Math.min(100, Math.round((m.step * 100) / m.total)) : 0;
-        return el.child(
-          v_flex().id("upd-modal").absolute().left(8).right(8).top(Math.max(8, horizon - 15)).px(10).py(8).gap(6).rounded(8).bg("#11111bee").border_1().border_color(bc).text_size(11).text_color("#cdd6f4")
-            .child(h_flex().items_center().justify_between()
-              .child(div().font_family(monoF).font_bold().text_size(10).text_color(bc).child(`PIXEL HQ UPDATE · v${m.version}`))
-              .when(!m.busy, (c) => c.child(div().cursor_pointer().text_size(13).font_family(monoF).text_color("#7f849c").hover((s) => s.text_color("#cdd6f4")).on_click((_e, cx) => this.closeUpdateModal(cx)).child("×"))))
-            .when(Boolean(m.notes), (c) => c.child(div().text_size(10).text_color("#a6adc8").child(m.notes)))
-            .when(Boolean(m.message), (c) => c.child(div().text_size(10.5).font_family(monoF).text_color(m.status === "error" ? "#ff5370" : m.status === "done" ? "#a6e3a1" : "#cdd6f4").child(m.message)))
-            .when(m.status === "updating" && m.total > 0, (c) => c.child(
-              h_flex().items_center().gap(8)
-                .child(div().w(120).h(3).rounded(2).bg("#313244").child(div().h_full().rounded(2).bg("#89b4fa").w(Math.max(2, Math.round((120 * pct) / 100)))))
-                .child(div().text_size(9.5).font_family(monoF).text_color("#7f849c").child(`${pct}%`))
-            ))
-            .child(h_flex().gap(6).items_center()
-              .when(m.status === "error", (c) => c
-                .child(btn("upd-retry", "Retry Auto-Update", "#89b4fa", "#11111b", (_e, cx) => this.doAutoUpdate(cx)))
-                .child(btn("upd-agent", "Use Agent Tab", "#313244", "#cdd6f4", (_e, cx) => this.doAgentUpdate(cx)))
-                .child(btn("upd-close", "Close", "#181825", "#7f849c", (_e, cx) => this.closeUpdateModal(cx))))
-              .when(m.status === "done", (c) => c
-                .child(btn("upd-reload", "Reload Layout", "#a6e3a1", "#11111b", () => run("layout.switch", { name: "pixel-hq" })))
-                .child(btn("upd-done", "Done", "#313244", "#cdd6f4", (_e, cx) => this.closeUpdateModal(cx))))
-              .when(m.status === "idle", (c) => c
-                .child(btn("upd-start", "Start Update", "#89b4fa", "#11111b", (_e, cx) => this.doAutoUpdate(cx)))
-                .child(btn("upd-agent", "Use Agent Tab", "#313244", "#cdd6f4", (_e, cx) => this.doAgentUpdate(cx)))
-                .child(btn("upd-close", "Later", "#181825", "#7f849c", (_e, cx) => this.closeUpdateModal(cx))))
-            )
-        );
-      })
-      .when(!this.updateModal?.open && Boolean(this.update || this.notice), (el) => {
+      .when(Boolean(this.update || this.notice), (el) => {
         const btn = (id, text, fill, ink, act) => div().id(id).px(10).h(22).flex().items_center().cursor_pointer().bg(fill).text_size(10.5).font_family(monoF).font_bold().text_color(ink).on_click(act).child(text);
         const box = v_flex().id("oc-notice").absolute().left(8).right(8).top(horizon + 6).px(8).py(6).gap(6).rounded(8).bg("#11111bee").border_1().border_color("#89b4fa").text_size(11).text_color("#cdd6f4");
         return el.child(this.update
           ? box.child(div().child(`Pixel HQ ${this.update.version} is out${this.update.notes ? ` · ${this.update.notes}` : ""}`))
             .child(h_flex().gap(6)
-              .child(btn("upd-go", "Update now", "#89b4fa", "#11111b", (_e, cx) => this.openUpdateModal(cx, true)))
+              .child(btn("upd-go", "Update now", "#89b4fa", "#11111b", () => this.runUpdate()))
               .child(btn("upd-later", "Later", "#313244", "#cdd6f4", (_e, cx) => { localStorage.setItem("upd-dismissed", this.update.version); this.update = null; cx.notify(); })))
           : box.cursor_pointer().on_click((_e, cx) => { this.notice = null; cx.notify(); }).child(this.notice));
       })
