@@ -41,6 +41,11 @@ const PIXEL_HQ_FILES = [
   "mods/company-agents/main.js",
 ];
 
+export function isUrgentUpdate(type) {
+  const t = String(type ?? "").toLowerCase().trim();
+  return t === "critical" || t === "urgent" || t === "important" || t === "hotfix" || t === "1" || t === "major";
+}
+
 export async function checkPixelHqUpdate(notifyUser = true) {
   try {
     let mine = null;
@@ -54,24 +59,42 @@ export async function checkPixelHqUpdate(notifyUser = true) {
     const latest = await res.json();
     if (!latest?.version) return null;
 
-    const newer = String(latest.version) !== String(mine.version);
+    const num = (v) => String(v).split(".").map((n) => parseInt(n, 10) || 0);
+    const [a, b] = [num(latest.version), num(mine?.version)];
+    const newer = [0, 1, 2].map((i) => (a[i] ?? 0) - (b[i] ?? 0)).find((d) => d !== 0) > 0;
     if (!newer) {
       setShared("pixel-hq.new-version", null);
       return null;
     }
 
-    const upd = { version: String(latest.version), notes: latest.notes ? String(latest.notes) : "" };
+    const urgent = isUrgentUpdate(latest.type);
+    const upd = {
+      version: String(latest.version),
+      type: latest.type ? String(latest.type) : (urgent ? "urgent" : "normal"),
+      isUrgent: urgent,
+      notes: latest.notes ? String(latest.notes) : "",
+    };
     setShared("pixel-hq.new-version", upd);
 
     const dismissed = shared("pixel-hq.dismissed-version");
     if (notifyUser && dismissed !== upd.version) {
-      notify({
-        title: "Pixel HQ update available",
-        body: `Version ${upd.version} is out · Click to update`,
-        level: "info",
-        timeout: 10000,
-        action: { name: "company-brand.update" },
-      });
+      if (urgent) {
+        notify({
+          title: `⚠️ Urgent Pixel HQ update: v${upd.version}`,
+          body: upd.notes ? `${upd.notes} · Click to update now` : `Critical update v${upd.version} is out · Click to update now`,
+          level: "warning",
+          timeout: 30000,
+          action: { name: "company-brand.update" },
+        });
+      } else {
+        notify({
+          title: "Pixel HQ update available",
+          body: `Version ${upd.version} is out · Click to update`,
+          level: "info",
+          timeout: 10000,
+          action: { name: "company-brand.update" },
+        });
+      }
     }
     return upd;
   } catch {

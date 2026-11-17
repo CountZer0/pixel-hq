@@ -63,12 +63,17 @@ export default class WorkspaceChrome extends View {
         .child(row("settings", "settings", "Settings", false, () => run("app.settings"))
           .when(Boolean(updates().app.ready), el => el.child(collapsed ? ready.absolute().top(5).right(6) : ready)))
         .child(row("machine", "plus", "Add machine", true, () => run("mod.open", { name: "machine-add" })))
-        .when(Boolean(upd), el => el.child(
-          row("update-hq", "sparkles", `Update Pixel HQ (${upd.version})`, false, async () => {
-            await executePixelHqUpdate();
-            cx.notify();
-          }).text_color(t.accent).child(ready)
-        ));
+        .when(Boolean(upd), el => {
+          const urgent = Boolean(upd?.isUrgent);
+          const label = urgent ? `⚠️ Urgent Update (v${upd.version})` : `Update Pixel HQ (v${upd.version})`;
+          const color = urgent ? (t.blocked ?? "#f38ba8") : t.accent;
+          return el.child(
+            row("update-hq", "sparkles", label, false, async () => {
+              await executePixelHqUpdate();
+              cx.notify();
+            }).text_color(color).child(ready)
+          );
+        });
     }
     // The company sign: a pixel asterisk in an orange tile, the company name and the floor.
     const logo = image("mods/company-brand/logo.png").size(34).flex_none();
@@ -77,12 +82,17 @@ export default class WorkspaceChrome extends View {
       .when(!collapsed, el => el.child(h_flex().flex_1().gap(9).items_center().child(logo)
         .child(v_flex().gap(0).child(div().font_semibold().text_size(14).text_color(t.foreground).child("Pixel HQ"))
           .child(div().text_size(10).text_color(t.dim).child("engineering floor")))))
-      .when(Boolean(upd && !collapsed), el => el.child(
-        this.button("update-btn", svg("mods/company-brand/sparkles.svg").size(15), async () => {
-          await executePixelHqUpdate();
-          cx.notify();
-        }).tooltip(`Update Pixel HQ to v${upd.version}`).text_color(t.accent)
-      ))
+      .when(Boolean(upd && !collapsed), el => {
+        const urgent = Boolean(upd?.isUrgent);
+        const color = urgent ? (t.blocked ?? "#f38ba8") : t.accent;
+        const tip = urgent ? `⚠️ Urgent update: Pixel HQ v${upd.version}` : `Update Pixel HQ to v${upd.version}`;
+        return el.child(
+          this.button("update-btn", svg("mods/company-brand/sparkles.svg").size(15), async () => {
+            await executePixelHqUpdate();
+            cx.notify();
+          }).tooltip(tip).text_color(color)
+        );
+      })
       .when(!collapsed, el => el.child(this.button("search", svg("mods/company-brand/search.svg").size(15), () => run("mod.open", { name: "picker" }))))
       // On the macOS rail the traffic lights fill the row; the agents list's » unfolds it.
       .when(!(collapsed && window()?.platform === "macos"), el => el.child(this.button("sidebar-toggle", svg("mods/company-brand/sidebar.svg").size(15), toggleSidebar)));

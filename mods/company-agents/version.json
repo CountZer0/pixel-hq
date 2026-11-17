@@ -1,4 +1,5 @@
 {
   "version": "1.6.4",
+  "type": "urgent",
   "notes": "Decouple update system: 10s toast notification, sidebar & status bar indicators, clean office floor"
 }

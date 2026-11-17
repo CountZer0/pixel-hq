@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 async function runTests() {
-  console.log("=== Running Update System Decoupling Tests ===");
+  console.log("=== Running Update System Decoupling & Urgency Types Tests ===");
 
   const brandPath = path.resolve(__dirname, "../mods/company-brand/main.js");
   const brandSrc = fs.readFileSync(brandPath, "utf8");
@@ -17,30 +17,55 @@ async function runTests() {
   const agentsPath = path.resolve(__dirname, "../mods/company-agents/main.js");
   const agentsSrc = fs.readFileSync(agentsPath, "utf8");
 
-  // 1. Verify company-brand has updater logic and toast notification support
+  // 1. Verify company-brand has updater logic and toast notification support with urgency levels
   assert.ok(brandUpdaterSrc.includes("export async function checkPixelHqUpdate"), "updater.js must export checkPixelHqUpdate");
   assert.ok(brandUpdaterSrc.includes("export async function executePixelHqUpdate"), "updater.js must export executePixelHqUpdate");
+  assert.ok(brandUpdaterSrc.includes("export function isUrgentUpdate"), "updater.js must export isUrgentUpdate helper");
   assert.ok(brandUpdaterSrc.includes("notify({"), "updater.js must trigger native toast notification");
-  assert.ok(brandUpdaterSrc.includes("timeout: 10000"), "toast notification must have 10-second timeout");
-  console.log("PASS: company-brand/updater.js exports check and execute functions with 10s toast notification");
+  assert.ok(brandUpdaterSrc.includes("timeout: 10000"), "normal toast notification must have 10-second timeout");
+  assert.ok(brandUpdaterSrc.includes("timeout: 30000"), "urgent toast notification must have 30-second timeout");
+  assert.ok(brandUpdaterSrc.includes('level: "warning"'), "urgent toast notification must use warning level");
+  assert.ok(brandUpdaterSrc.includes('level: "info"'), "normal toast notification must use info level");
+  console.log("PASS: company-brand/updater.js exports check and execute functions with type 1 (urgent) and type 2 (normal) toasts");
 
-  // 2. Verify Position 1: company-brand footer & header indicator
+  // 2. Verify isUrgentUpdate classification
+  function testIsUrgent(type) {
+    const t = String(type ?? "").toLowerCase().trim();
+    return t === "critical" || t === "urgent" || t === "important" || t === "hotfix" || t === "1" || t === "major";
+  }
+  assert.strictEqual(testIsUrgent("urgent"), true, "urgent must be true");
+  assert.strictEqual(testIsUrgent("critical"), true, "critical must be true");
+  assert.strictEqual(testIsUrgent("important"), true, "important must be true");
+  assert.strictEqual(testIsUrgent("hotfix"), true, "hotfix must be true");
+  assert.strictEqual(testIsUrgent("1"), true, "type 1 string must be true");
+  assert.strictEqual(testIsUrgent(1), true, "type 1 number must be true");
+  assert.strictEqual(testIsUrgent("normal"), false, "normal must be false");
+  assert.strictEqual(testIsUrgent("routine"), false, "routine must be false");
+  assert.strictEqual(testIsUrgent("2"), false, "type 2 string must be false");
+  assert.strictEqual(testIsUrgent(undefined), false, "default undefined must be false");
+  console.log("PASS: isUrgentUpdate correctly distinguishes Type 1 (urgent/critical) from Type 2 (normal/routine)");
+
+  // 3. Verify Position 1: company-brand footer & header indicators adapt to urgency
   assert.ok(brandSrc.includes("checkPixelHqUpdate(true)"), "company-brand must check for updates on startup");
   assert.ok(brandSrc.includes('row("update-hq"'), "company-brand footer must include Update Pixel HQ row");
+  assert.ok(brandSrc.includes("⚠️ Urgent Update"), "company-brand footer must show Urgent Update when isUrgent is true");
   assert.ok(brandSrc.includes('c === "update"'), "company-brand must listen to nextCommand for update");
-  console.log("PASS: Position 1 verified in company-brand (footer row & header button with command listener)");
+  console.log("PASS: Position 1 verified in company-brand (footer row & header button with urgency-aware labels and styling)");
 
-  // 3. Verify Position 2: company-status bottom status bar pill
+  // 4. Verify Position 2: company-status bottom status bar pill is clear (not confused with current version)
   assert.ok(statusSrc.includes('id("update-status-pill")'), "company-status must include update-status-pill");
+  assert.ok(!statusSrc.includes('`🚀 v${upd.version}`'), "company-status must NOT just show raw version like current version");
+  assert.ok(statusSrc.includes("✨ New update: v${upd.version}"), "company-status must clearly show '✨ New update: v...' for normal type");
+  assert.ok(statusSrc.includes("⚠️ Urgent update: v${upd.version}"), "company-status must show '⚠️ Urgent update: v...' for urgent type");
   assert.ok(statusSrc.includes('run("company-brand.update")'), "update-status-pill must trigger company-brand.update on click");
-  console.log("PASS: Position 2 verified in company-status (status bar pill triggering company-brand.update)");
+  console.log("PASS: Position 2 verified in company-status (clear 'New update' pill avoiding version confusion and adapting to Type 1/2)");
 
-  // 4. Verify company-agents office floor banner has been cleanly removed
+  // 5. Verify company-agents office floor banner has been cleanly removed
   assert.ok(!agentsSrc.includes('Pixel HQ ${this.update.version} is out'), "company-agents office floor must not render update banner");
   assert.ok(!agentsSrc.includes('btn("upd-go"'), "company-agents must not render old upd-go button");
   console.log("PASS: Obtrusive update banner cleanly eradicated from company-agents office floor");
 
-  console.log("All Update System Decoupling tests passed!");
+  console.log("All Update System Decoupling & Urgency Types tests passed!");
 }
 
 runTests().catch((err) => {

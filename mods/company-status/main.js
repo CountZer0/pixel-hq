@@ -33,12 +33,18 @@ export default class WorkspaceStatus extends View {
       .child(div().text_color(t.dim).child(`${list.length} on the team`))
       .when(Boolean(shared("pixel-hq.new-version")), (el) => {
         const upd = shared("pixel-hq.new-version");
+        const urgent = Boolean(upd?.isUrgent);
+        const pillBg = urgent ? (t.blocked ?? "#f38ba8") : t.accent;
+        const pillText = urgent ? `⚠️ Urgent update: v${upd.version}` : `✨ New update: v${upd.version}`;
+        const tooltip = urgent
+          ? `[Urgent Update] Pixel HQ v${upd.version} is out${upd.notes ? ` · ${upd.notes}` : ""} · Click to update now`
+          : `Pixel HQ v${upd.version} is out${upd.notes ? ` · ${upd.notes}` : ""} · Click to update`;
         return el.child(
-          h_flex().id("update-status-pill").gap(6).items_center().px(6).py(2).rounded(6)
-            .bg(t.accent).text_color(t.chrome).cursor_pointer().hover(s => s.opacity(0.85))
-            .tooltip(`Pixel HQ v${upd.version} is out · Click to update`)
+          h_flex().id("update-status-pill").gap(6).items_center().px(7).py(2).rounded(6)
+            .bg(pillBg).text_color(t.chrome).cursor_pointer().hover(s => s.opacity(0.85))
+            .tooltip(tooltip)
             .on_click(() => run("company-brand.update"))
-            .child(div().font_bold().text_size(11).child(`🚀 v${upd.version}`))
+            .child(div().font_bold().text_size(11).child(pillText))
         );
       })
       .when(n("working") > 0, el => el.child(pill("#89b4fa", `${n("working")} typing`)))
