@@ -249,19 +249,7 @@ export default class Agents extends View {
         for (const [addr, until] of this.nudged) if (now > until) this.nudged.delete(addr);
         cx.notify();
       }
-      if (this.pendingSetupClaude && now - this.lastSetupClaudeAttempt > 4000 && !this.isBusy(/claude/)) {
-        this.setupClaude(cx);
-      }
-      if (this.pendingSetupAntigravity && now - this.lastSetupAntigravityAttempt > 4000 && !this.isBusy(/antigravity|agy/)) {
-        this.setupAntigravity(cx);
-      }
-      if (this.pendingSetupOpenCode && now - this.lastSetupOpenCodeAttempt > 4000 && !this.isBusy(/opencode/)) {
-        this.setupOpenCode(cx);
-        this.setupOpenCodeHp(cx);
-      }
-      if (this.pendingSetupCodex && now - this.lastSetupCodexAttempt > 4000 && !this.isBusy(/codex/)) {
-        this.setupCodex(cx);
-      }
+      this.flushPending(cx);
       if (this.out) {
         if (now >= this.out.until) { this.out = null; this.nextAt = now + 14000 + Math.random() * 18000; cx.notify(); }
         return;
@@ -284,7 +272,7 @@ export default class Agents extends View {
 
   // Stamps agents whose state changed. Done and idle count as one: looking at a
   // finished agent turns done into idle, and looking isn't the agent doing anything.
-  track(list, now) {
+  track(list, now, cx) {
     let dirty = false;
     for (const a of list) {
       const s = a.status === "done" ? "idle" : a.status;
@@ -293,6 +281,7 @@ export default class Agents extends View {
       dirty = true;
     }
     if (!dirty) return;
+    if (this.hasPending()) this.flushPending(cx);
     // Gone and old: the list alone is empty right after a start.
     const listed = new Set(list.map((a) => a.address));
     for (const [k, c] of Object.entries(this.changed)) if (!listed.has(k) && now - c.at > 30 * 86400000) delete this.changed[k];
@@ -457,6 +446,28 @@ export default class Agents extends View {
       });
     } catch {
       return false;
+    }
+  }
+
+  hasPending() {
+    return Boolean(this.pendingSetupClaude || this.pendingSetupAntigravity || this.pendingSetupOpenCode || this.pendingSetupCodex);
+  }
+
+  flushPending(cx) {
+    if (!this.hasPending()) return;
+    const now = Date.now();
+    if (this.pendingSetupClaude && now - this.lastSetupClaudeAttempt > 4000 && !this.isBusy(/claude/)) {
+      this.setupClaude(cx);
+    }
+    if (this.pendingSetupAntigravity && now - this.lastSetupAntigravityAttempt > 4000 && !this.isBusy(/antigravity|agy/)) {
+      this.setupAntigravity(cx);
+    }
+    if (this.pendingSetupOpenCode && now - this.lastSetupOpenCodeAttempt > 4000 && !this.isBusy(/opencode/)) {
+      this.setupOpenCode(cx);
+      this.setupOpenCodeHp(cx);
+    }
+    if (this.pendingSetupCodex && now - this.lastSetupCodexAttempt > 4000 && !this.isBusy(/codex/)) {
+      this.setupCodex(cx);
     }
   }
 
@@ -969,7 +980,7 @@ export default class Agents extends View {
     this.migratePins(all);
     const shown = focused()?.agent;
     const now = Date.now();
-    this.track(list, now);
+    this.track(list, now, cx);
     this.watch(list, now);
     this.hold(list);
     // A kept sub-agent (one with a pane) is in agents() too: where a tree shows
