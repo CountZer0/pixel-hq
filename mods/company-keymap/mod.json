@@ -3,7 +3,7 @@
   "title": "Keymap & Workspace Switcher",
   "overlay": {
     "kind": "dialog",
-    "width": 640,
-    "height": 520
+    "width": 680,
+    "height": 580
   }
 }

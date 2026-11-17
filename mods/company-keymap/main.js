@@ -1,16 +1,16 @@
 // Pixel HQ Keymap & Workspace Switcher
-// Instant switching between spaces/floors and one-click hotkey configuration.
+// Instant switching between spaces/floors, VS Code style Ctrl+P cycling, and custom hotkey management.
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { spaces, agents, run, theme, props, closeOverlay, readTextFile, writeTextFile } from "herdr";
+import { spaces, agents, run, theme, props, closeOverlay, readTextFile, writeTextFile, keys } from "herdr";
 
 const MONO = "JetBrains Mono, Menlo, monospace";
 
 const PRESETS = {
   vscode: {
-    name: "VS Code / Fast Nav (Recommended)",
-    desc: "Ctrl+P for Switcher, Alt+[ and Alt+] for prev/next space",
+    name: "VS Code Fast Nav (Recommended)",
+    desc: "Ctrl+P for quick Switcher & cycle, Alt+[ and Alt+] for prev/next space",
     keys: {
       "ctrl-p": "mod.open:company-keymap",
       "alt-[": "space.prev",
@@ -19,23 +19,32 @@ const PRESETS = {
   },
   tmux: {
     name: "Tmux Style",
-    desc: "Ctrl+B for Switcher, Alt+J and Alt+K for next/prev space",
+    desc: "Ctrl+B for Switcher, Alt+N and Alt+P for next/prev space (safe: preserves Alt+J/K for panes)",
     keys: {
       "ctrl-b": "mod.open:company-keymap",
-      "alt-j": "space.next",
-      "alt-k": "space.prev",
+      "alt-n": "space.next",
+      "alt-p": "space.prev",
     },
   },
   defaults: {
-    name: "Herdr Defaults",
-    desc: "Ctrl+Shift+K for picker, Ctrl+Shift+PageDown/Up for spaces",
+    name: "Herdr Defaults (Reset)",
+    desc: "Reset to default Herdr bindings: Ctrl+Shift+P for palette, Ctrl+Shift+PageDown/Up for spaces",
     keys: {
       "ctrl-p": "app.palette",
+      "ctrl-shift-p": "app.palette",
       "ctrl-shift-pagedown": "space.next",
       "ctrl-shift-pageup": "space.prev",
     },
   },
 };
+
+const ACTION_OPTIONS = [
+  { id: "mod.open:company-keymap", label: "Floor Switcher", desc: "Open this floor switcher modal" },
+  { id: "space.next", label: "Next Space", desc: "Jump to next workspace floor" },
+  { id: "space.prev", label: "Prev Space", desc: "Jump to previous workspace floor" },
+  { id: "space.new", label: "New Space", desc: "Create new workspace floor" },
+  { id: "app.palette", label: "Command Palette", desc: "Open Herdr command palette" },
+];
 
 export default class CompanyKeymap extends View {
   init(_props, cx) {
@@ -44,6 +53,8 @@ export default class CompanyKeymap extends View {
     this.selected = 0;
     this.notice = null;
     this.loading = false;
+    this.cycling = false;
+    this.targetAction = "mod.open:company-keymap";
 
     this.input = InputState.new({ placeholder: "Search workspace / floor, or press 1-9 to jump…" });
     this.input.on("change", (_e, cx) => {
@@ -52,6 +63,8 @@ export default class CompanyKeymap extends View {
       cx.notify();
     });
     this.input.on("submit", (_e, cx) => this.switchCurrent(cx));
+
+    this.customKeyInput = InputState.new({ placeholder: "e.g. ctrl-p, alt-w, ctrl-b" });
 
     this.handle = cx.focus_handle();
     this.handle.focus();
@@ -80,11 +93,81 @@ export default class CompanyKeymap extends View {
     }
   }
 
+  normalizeKey(input) {
+    if (!input) return "";
+    return input
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, "")
+      .replace(/\+/g, "-");
+  }
+
+  async saveCustomKey(cx) {
+    const rawKey = this.customKeyInput.value();
+    const chord = this.normalizeKey(rawKey);
+    if (!chord) {
+      this.notice = "Please enter a valid key chord (e.g. ctrl-p, alt-w, ctrl-b).";
+      cx.notify();
+      return;
+    }
+
+    this.loading = true;
+    this.notice = `Saving shortcut ${chord}…`;
+    cx.notify();
+
+    try {
+      const raw = await readTextFile("keys.json").catch(() => null);
+      let data = {};
+      if (raw) {
+        try { data = JSON.parse(raw); } catch { data = {}; }
+      }
+      data.global = data.global ?? {};
+      data.terminal = data.terminal ?? {};
+
+      data.global[chord] = this.targetAction;
+      data.terminal[chord] = this.targetAction;
+
+      const nextRaw = JSON.stringify(data, null, 2) + "\n";
+      await writeTextFile("keys.json", nextRaw, raw);
+      this.notice = `✓ Saved: ${chord} → ${this.targetAction}! Applied live to keys.json.`;
+    } catch (err) {
+      this.notice = `Error saving key: ${err?.message ?? err}`;
+    } finally {
+      this.loading = false;
+      cx.notify();
+    }
+  }
+
+  async removeKey(chord, cx) {
+    this.loading = true;
+    this.notice = `Removing shortcut ${chord}…`;
+    cx.notify();
+
+    try {
+      const raw = await readTextFile("keys.json").catch(() => null);
+      let data = {};
+      if (raw) {
+        try { data = JSON.parse(raw); } catch { data = {}; }
+      }
+      if (data.global) delete data.global[chord];
+      if (data.terminal) delete data.terminal[chord];
+
+      const nextRaw = JSON.stringify(data, null, 2) + "\n";
+      await writeTextFile("keys.json", nextRaw, raw);
+      this.notice = `✓ Removed shortcut: ${chord}.`;
+    } catch (err) {
+      this.notice = `Error removing key: ${err?.message ?? err}`;
+    } finally {
+      this.loading = false;
+      cx.notify();
+    }
+  }
+
   async applyPreset(presetKey, cx) {
     const preset = PRESETS[presetKey];
     if (!preset) return;
     this.loading = true;
-    this.notice = "Applying preset…";
+    this.notice = `Applying ${preset.name}…`;
     cx.notify();
 
     try {
@@ -97,19 +180,37 @@ export default class CompanyKeymap extends View {
       data.terminal = data.terminal ?? {};
 
       for (const [key, action] of Object.entries(preset.keys)) {
-        data.global[key] = action;
-        data.terminal[key] = action;
+        if (action === null) {
+          delete data.global[key];
+          delete data.terminal[key];
+        } else {
+          data.global[key] = action;
+          data.terminal[key] = action;
+        }
       }
 
       const nextRaw = JSON.stringify(data, null, 2) + "\n";
       await writeTextFile("keys.json", nextRaw, raw);
-      this.notice = `Applied: ${preset.name}! Updated live in keys.json.`;
+      this.notice = `✓ Applied: ${preset.name}! Updated live in keys.json.`;
     } catch (err) {
       this.notice = `Error saving keys: ${err?.message ?? err}`;
     } finally {
       this.loading = false;
       cx.notify();
     }
+  }
+
+  getCurrentNavBindings() {
+    const allKeys = keys() ?? [];
+    const navActions = new Set(ACTION_OPTIONS.map((a) => a.id));
+    const map = new Map();
+    for (const k of allKeys) {
+      if (k.section === "global" && navActions.has(k.action)) {
+        if (!map.has(k.action)) map.set(k.action, []);
+        map.get(k.action).push(k.keys);
+      }
+    }
+    return map;
   }
 
   render(cx) {
@@ -121,8 +222,9 @@ export default class CompanyKeymap extends View {
       if (!crewMap.has(a.space)) crewMap.set(a.space, []);
       crewMap.get(a.space).push(a);
     }
+    const currentBindings = this.getCurrentNavBindings();
 
-    const tabBtn = (id, label, icon) => {
+    const tabBtn = (id, label) => {
       const on = this.tab === id;
       return h_flex()
         .id(`tab-${id}`)
@@ -147,11 +249,40 @@ export default class CompanyKeymap extends View {
     return v_flex()
       .id("company-keymap")
       .track_focus(this.handle)
+      .on_modifiers_changed((e, cx) => {
+        const ctrlDown = Boolean(e.modifiers?.control || e.modifiers?.platform);
+        if (!ctrlDown && this.cycling) {
+          this.cycling = false;
+          this.switchCurrent(cx);
+        }
+      })
       .on_key_down((e, cx) => {
         if (e.key === "escape") {
+          this.cycling = false;
           closeOverlay(props()?.overlay);
           cx.stop_propagation();
           return;
+        }
+
+        const isCtrlOrCmd = Boolean(e.modifiers?.control || e.modifiers?.platform);
+        const isP = e.key === "p" || e.key === "P" || e.keystroke?.endsWith("-p");
+
+        if (isCtrlOrCmd && isP) {
+          if (this.tab !== "switcher") {
+            this.tab = "switcher";
+          }
+          const list = this.filteredSpaces();
+          if (list.length > 0) {
+            if (e.modifiers?.shift) {
+              this.selected = (this.selected - 1 + list.length) % list.length;
+            } else {
+              this.selected = (this.selected + 1) % list.length;
+            }
+            this.cycling = true;
+            cx.stop_propagation();
+            cx.notify();
+            return;
+          }
         }
 
         if (this.tab === "switcher") {
@@ -168,6 +299,7 @@ export default class CompanyKeymap extends View {
             return;
           }
           if (e.key === "enter") {
+            this.cycling = false;
             this.switchCurrent(cx);
             cx.stop_propagation();
             return;
@@ -176,12 +308,21 @@ export default class CompanyKeymap extends View {
             const idx = parseInt(e.key, 10) - 1;
             const all = spaces() ?? [];
             if (all[idx]) {
+              this.cycling = false;
               run("space.select", { id: all[idx].id });
               closeOverlay(props()?.overlay);
               cx.stop_propagation();
               return;
             }
           }
+        }
+      })
+      .on_key_up((e, cx) => {
+        const k = (e.key ?? "").toLowerCase();
+        if ((k === "control" || k === "ctrl" || k === "meta" || k === "command") && this.cycling) {
+          this.cycling = false;
+          this.switchCurrent(cx);
+          cx.stop_propagation();
         }
       })
       .size_full()
@@ -222,8 +363,8 @@ export default class CompanyKeymap extends View {
           .child(
             h_flex()
               .gap(6)
-              .child(tabBtn("switcher", "Switch Floors", "layers"))
-              .child(tabBtn("hotkeys", "Hotkey Presets", "keyboard"))
+              .child(tabBtn("switcher", "Switch Floors"))
+              .child(tabBtn("hotkeys", "Hotkeys & Keymap"))
               .child(
                 div()
                   .id("btn-esc")
@@ -386,7 +527,7 @@ export default class CompanyKeymap extends View {
               .justify_between()
               .text_size(11)
               .text_color("#6c7086")
-              .child("↑/↓ navigate · Enter switch · 1–9 quick jump · Esc close")
+              .child("Hold Ctrl + press P to cycle & release to switch · 1–9 quick jump")
               .child("Switch between workspace floors instantly"),
           ),
       )
@@ -398,14 +539,6 @@ export default class CompanyKeymap extends View {
               .min_h(0)
               .gap(12)
               .overflow_y_scrollbar()
-              .child(
-                div()
-                  .text_size(12.5)
-                  .text_color("#a6adc8")
-                  .child(
-                    "Choose a navigation preset below to automatically update your ~/.config/herdr-app/keys.json file in real-time.",
-                  ),
-              )
               .when(Boolean(this.notice), (ch) =>
                 ch.child(
                   h_flex()
@@ -419,63 +552,254 @@ export default class CompanyKeymap extends View {
                     .child(this.notice),
                 ),
               )
+              // Section 1: Custom Keymap Input
               .child(
                 v_flex()
+                  .p(12)
                   .gap(8)
-                  .children(
-                    Object.entries(PRESETS).map(([key, p]) =>
-                      h_flex()
-                        .p(12)
-                        .rounded(10)
-                        .bg("#1e1e2e")
-                        .border_1()
-                        .border_color("#ffffff14")
-                        .items_center()
-                        .justify_between()
-                        .child(
-                          v_flex()
-                            .gap(3)
-                            .child(div().font_semibold().text_color("#cdd6f4").child(p.name))
-                            .child(div().text_size(11.5).text_color("#a6adc8").child(p.desc))
+                  .rounded(10)
+                  .bg("#1e1e2e")
+                  .border_1()
+                  .border_color("#ffffff14")
+                  .child(
+                    div()
+                      .font_semibold()
+                      .text_size(13)
+                      .text_color("#cdd6f4")
+                      .child("Custom Shortcut (Tự đặt phím tắt theo ý muốn)"),
+                  )
+                  .child(
+                    div()
+                      .text_size(11)
+                      .text_color("#a6adc8")
+                      .child("Choose an action and type your desired key chord (e.g. ctrl-p, alt-w, ctrl-b, alt-[):"),
+                  )
+                  .child(
+                    h_flex()
+                      .gap(6)
+                      .flex_wrap()
+                      .children(
+                        ACTION_OPTIONS.map((opt) => {
+                          const active = this.targetAction === opt.id;
+                          return h_flex()
+                            .px(8)
+                            .py(3)
+                            .rounded(5)
+                            .cursor_pointer()
+                            .bg(active ? "#89b4fa" : "#11111b")
+                            .text_color(active ? "#181825" : "#cdd6f4")
+                            .font_medium()
+                            .text_size(11)
+                            .border_1()
+                            .border_color(active ? "#89b4fa" : "#ffffff10")
+                            .hover((s) => s.opacity(0.85))
+                            .on_click(() => {
+                              this.targetAction = opt.id;
+                              cx.notify();
+                            })
+                            .child(opt.label);
+                        }),
+                      ),
+                  )
+                  .child(
+                    h_flex()
+                      .gap(8)
+                      .items_center()
+                      .child(
+                        Input.new(this.customKeyInput)
+                          .h(32)
+                          .flex_1()
+                          .px(10)
+                          .rounded(6)
+                          .border_1()
+                          .border_color("#89b4fa66")
+                          .bg("#181825")
+                          .text_size(12)
+                          .text_color("#cdd6f4"),
+                      )
+                      .child(
+                        h_flex()
+                          .h(32)
+                          .px(14)
+                          .rounded(6)
+                          .cursor_pointer()
+                          .bg("#89b4fa")
+                          .items_center()
+                          .hover((s) => s.opacity(0.88))
+                          .on_click(() => this.saveCustomKey(cx))
+                          .child(
+                            div()
+                              .font_semibold()
+                              .text_size(12)
+                              .text_color("#181825")
+                              .child("Save Shortcut"),
+                          ),
+                      ),
+                  ),
+              )
+              // Section 2: Active Navigation Bindings
+              .child(
+                v_flex()
+                  .p(12)
+                  .gap(8)
+                  .rounded(10)
+                  .bg("#1e1e2e")
+                  .border_1()
+                  .border_color("#ffffff14")
+                  .child(
+                    div()
+                      .font_semibold()
+                      .text_size(13)
+                      .text_color("#cdd6f4")
+                      .child("Active Navigation Shortcuts (Phím tắt đang hoạt động)"),
+                  )
+                  .child(
+                    v_flex()
+                      .gap(6)
+                      .children(
+                        ACTION_OPTIONS.map((opt) => {
+                          const keysList = currentBindings.get(opt.id) ?? [];
+                          return h_flex()
+                            .p(6)
+                            .rounded(6)
+                            .bg("#181825")
+                            .items_center()
+                            .justify_between()
+                            .child(
+                              v_flex()
+                                .gap(1)
+                                .child(div().text_size(12).font_medium().text_color("#cdd6f4").child(opt.label))
+                                .child(div().text_size(10.5).text_color("#6c7086").child(opt.desc)),
+                            )
                             .child(
                               h_flex()
                                 .gap(6)
-                                .pt(4)
+                                .items_center()
                                 .children(
-                                  Object.entries(p.keys).map(([k, act]) =>
-                                    h_flex()
-                                      .h(20)
-                                      .px(6)
-                                      .rounded(4)
-                                      .bg("#11111b")
-                                      .items_center()
-                                      .gap(4)
-                                      .child(div().text_size(10.5).font_bold().text_color("#89b4fa").child(k))
-                                      .child(div().text_size(10).text_color("#6c7086").child("→"))
-                                      .child(div().text_size(10).text_color("#a6adc8").child(act)),
-                                  ),
+                                  keysList.length > 0
+                                    ? keysList.map((k) =>
+                                        h_flex()
+                                          .h(22)
+                                          .px(6)
+                                          .gap(4)
+                                          .rounded(4)
+                                          .bg("#11111b")
+                                          .border_1()
+                                          .border_color("#89b4fa44")
+                                          .items_center()
+                                          .child(
+                                            div()
+                                              .text_size(10.5)
+                                              .font_bold()
+                                              .font_family(MONO)
+                                              .text_color("#89b4fa")
+                                              .child(k),
+                                          )
+                                          .child(
+                                            div()
+                                              .cursor_pointer()
+                                              .text_size(10)
+                                              .text_color("#f38ba8")
+                                              .hover((s) => s.text_color("#ff0000"))
+                                              .on_click(() => this.removeKey(k, cx))
+                                              .child("×"),
+                                          ),
+                                      )
+                                    : [
+                                        div()
+                                          .text_size(11)
+                                          .text_color("#6c7086")
+                                          .child("Not bound"),
+                                      ],
+                                ),
+                            );
+                        }),
+                      ),
+                  ),
+              )
+              // Section 3: Curated Presets
+              .child(
+                v_flex()
+                  .p(12)
+                  .gap(8)
+                  .rounded(10)
+                  .bg("#1e1e2e")
+                  .border_1()
+                  .border_color("#ffffff14")
+                  .child(
+                    div()
+                      .font_semibold()
+                      .text_size(13)
+                      .text_color("#cdd6f4")
+                      .child("Quick Navigation Presets (Bộ phím tắt cấu hình sẵn)"),
+                  )
+                  .child(
+                    v_flex()
+                      .gap(8)
+                      .children(
+                        Object.entries(PRESETS).map(([key, p]) =>
+                          h_flex()
+                            .p(10)
+                            .rounded(8)
+                            .bg("#181825")
+                            .border_1()
+                            .border_color("#ffffff10")
+                            .items_center()
+                            .justify_between()
+                            .child(
+                              v_flex()
+                                .gap(2)
+                                .child(div().font_semibold().text_color("#cdd6f4").child(p.name))
+                                .child(div().text_size(11).text_color("#a6adc8").child(p.desc))
+                                .child(
+                                  h_flex()
+                                    .gap(6)
+                                    .pt(4)
+                                    .children(
+                                      Object.entries(p.keys)
+                                        .filter(([, act]) => act !== null)
+                                        .map(([k, act]) =>
+                                          h_flex()
+                                            .h(18)
+                                            .px(5)
+                                            .rounded(4)
+                                            .bg("#11111b")
+                                            .items_center()
+                                            .gap(4)
+                                            .child(
+                                              div()
+                                                .text_size(10)
+                                                .font_bold()
+                                                .font_family(MONO)
+                                                .text_color("#89b4fa")
+                                                .child(k),
+                                            )
+                                            .child(div().text_size(9).text_color("#6c7086").child("→"))
+                                            .child(div().text_size(9.5).text_color("#a6adc8").child(act)),
+                                        ),
+                                    ),
+                                ),
+                            )
+                            .child(
+                              h_flex()
+                                .h(28)
+                                .px(10)
+                                .rounded(6)
+                                .cursor_pointer()
+                                .bg("#89b4fa")
+                                .items_center()
+                                .hover((s) => s.opacity(0.88))
+                                .on_click(() => this.applyPreset(key, cx))
+                                .child(
+                                  div()
+                                    .font_semibold()
+                                    .text_size(11.5)
+                                    .text_color("#181825")
+                                    .child("Apply"),
                                 ),
                             ),
-                        )
-                        .child(
-                          h_flex()
-                            .h(30)
-                            .px(12)
-                            .rounded(7)
-                            .cursor_pointer()
-                            .bg("#89b4fa")
-                            .items_center()
-                            .hover((s) => s.opacity(0.88))
-                            .on_click(() => this.applyPreset(key, cx))
-                            .child(
-                              div()
-                                .font_semibold()
-                                .text_size(12)
-                                .text_color("#181825")
-                                .child("Apply Preset"),
-                            ),
                         ),
-                    ),
+                      ),
                   ),
               )
               .child(

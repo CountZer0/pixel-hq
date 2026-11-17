@@ -3,6 +3,15 @@ import { h_flex } from "gpui-base";
 import { spaces, panes, focused, agents, theme, run, window, keys, setBadge, openOverlay, shared } from "herdr";
 
 export default class WorkspaceStatus extends View {
+  keymapHint(t) {
+    const mac = window()?.platform === "macos";
+    const mod = { cmd: mac ? "⌘" : "Ctrl+", ctrl: mac ? "⌃" : "Ctrl+", shift: mac ? "⇧" : "Shift+", alt: mac ? "⌥" : "Alt+", option: mac ? "⌥" : "Alt+" };
+    const b = keys().find((k) => k.section === "global" && k.action === "mod.open:company-keymap");
+    const parts = b && b.keys.endsWith("--") ? [...b.keys.slice(0, -2).split("-"), "-"] : b?.keys.split("-");
+    const key = parts ? parts.map((p) => mod[p.toLowerCase()] ?? p.toUpperCase()).join("") : (mac ? "⌘P" : "Ctrl+P");
+    return `${key}  switcher`;
+  }
+
   // The palette key as actually bound, not a hardcoded one; without a
   // binding the hint stays useful ("commands") instead of lying.
   hint(t) {
@@ -65,6 +74,19 @@ export default class WorkspaceStatus extends View {
       .when(n("done") > 0, el => el.child(pill(t.done ?? "#8ec07c", `${n("done")} shipped`)))
       .when(list.length - n("working") - n("blocked") - n("done") > 0, el => el.child(pill(t.dim ?? "#9a8f86", `${list.length - n("working") - n("blocked") - n("done")} on break`)))
       .child(div().flex_1())
-      .child(div().id("palette").text_color(t.dim).on_click(() => run("app.palette")).child(this.hint(t)));
+      .child(
+        h_flex()
+          .id("btn-company-keymap")
+          .cursor_pointer()
+          .px(6)
+          .py(2)
+          .rounded(4)
+          .text_color(t.dim)
+          .hover((s) => s.bg(t.hover).text_color(t.foreground))
+          .tooltip("Open Floor Switcher & Keymap Settings")
+          .on_click(() => run("mod.open", { name: "company-keymap" }))
+          .child(this.keymapHint(t))
+      )
+      .child(div().id("palette").cursor_pointer().px(6).py(2).rounded(4).text_color(t.dim).hover(s => s.bg(t.hover).text_color(t.foreground)).on_click(() => run("app.palette")).child(this.hint(t)));
   }
 }
