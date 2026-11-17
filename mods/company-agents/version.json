@@ -1,4 +1,4 @@
 {
-  "version": "1.6.3",
-  "notes": "Fix model quoting in statusline, address prefix cleanAddr for remote terminals, and active Codex session detection"
+  "version": "1.6.4",
+  "notes": "Decouple update system: 10s toast notification, sidebar & status bar indicators, clean office floor"
 }

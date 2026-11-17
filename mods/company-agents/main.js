@@ -342,11 +342,6 @@ export default class Agents extends View {
     this.setupClaude(cx);
     this.setupAntigravity(cx);
     this.setupCodex(cx);
-    // Tell the person when a newer Pixel HQ is out: read the tiny version.json from GitHub at start and every 6 hours.
-    // Nothing is sent. Deleting this mod's own version.json turns the check off.
-    this.update = null;
-    this.checkUpdate(cx);
-    cx.timer.every(6 * 3600 * 1000, (cx) => this.checkUpdate(cx));
     // Now and then (every 14 to 32 s) one idle pet steps out beside its desk for about 3.6 s, then comes back.
     this.out = null;
     this.breakerList = [];
@@ -831,31 +826,6 @@ export default class Agents extends View {
     this.nudged.set(a.address, now + 3000);
     run("pane.focus", { pane: a.pane });
     cx.notify();
-  }
-
-  async checkUpdate(cx) {
-    try {
-      const mine = JSON.parse(await readTextFile(`${appHome()}/mods/company-agents/version.json`));
-      const res = await fetch(`https://raw.githubusercontent.com/bnhan2710/pixel-hq/main/mods/company-agents/version.json?t=${Date.now()}`);
-      if (!res.ok) return;
-      const latest = JSON.parse(await res.text());
-      const num = (v) => String(v).split(".").map((n) => parseInt(n, 10) || 0);
-      const [a, b] = [num(latest.version), num(mine.version)];
-      const newer = [0, 1, 2].map((i) => (a[i] ?? 0) - (b[i] ?? 0)).find((d) => d !== 0) > 0;
-      if (!newer || (shared("pixel-hq.dismissed-version") || localStorage.getItem("upd-dismissed")) === String(latest.version)) {
-        if (mine?.version) {
-          localStorage.setItem("upd-dismissed", String(mine.version));
-          setShared("pixel-hq.dismissed-version", String(mine.version));
-        }
-        if (this.update) {
-          this.update = null;
-          cx.notify();
-        }
-        return;
-      }
-      this.update = { version: String(latest.version), notes: latest.notes ? String(latest.notes) : "" };
-      cx.notify();
-    } catch { /* offline, no version.json, or not valid: stay quiet */ }
   }
 
   async setupOpenCode(cx) {
@@ -1563,23 +1533,12 @@ export default class Agents extends View {
       .when(hidden > 0, (el) => el.child(div().absolute().right(8).top(horizon + 6).px(8).py(3).rounded(8).bg("#11111bdd").border_1().border_color("#45475a").text_size(11).text_color("#cdd6f4").child(`+${hidden} more · narrow the panel to list all`)))
       .children(links)
       .children(this.drag?.moved ? [...pets.filter((_, i) => seated[i].address !== this.drag.addr), ...pets.filter((_, i) => seated[i].address === this.drag.addr)] : pets)
-      .when(Boolean(this.update || this.notice), (el) => {
-        const btn = (id, text, fill, ink, act) => div().id(id).px(10).h(22).flex().items_center().cursor_pointer().bg(fill).text_size(10.5).font_family(monoF).font_bold().text_color(ink).on_click(act).child(text);
+      .when(Boolean(this.notice), (el) => {
         const box = v_flex().id("oc-notice").absolute().left(8).right(8).top(horizon + 6).px(8).py(6).gap(6).rounded(8).bg("#11111bee").border_1().border_color("#89b4fa").text_size(11).text_color("#cdd6f4")
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation());
-        return el.child(this.update
-          ? box.child(div().child(`Pixel HQ ${this.update.version} is out${this.update.notes ? ` · ${this.update.notes}` : ""}`))
-            .child(h_flex().gap(6)
-              .child(btn("upd-go", "Update now", "#89b4fa", "#11111b", () => this.runUpdate()))
-              .child(btn("upd-later", "Later", "#313244", "#cdd6f4", (_e, cx) => {
-                localStorage.setItem("upd-dismissed", this.update.version);
-                setShared("pixel-hq.dismissed-version", this.update.version);
-                this.update = null;
-                cx.notify();
-              })))
-          : box.cursor_pointer().on_click((_e, cx) => { this.notice = null; cx.notify(); }).child(this.notice));
+        return el.child(box.cursor_pointer().on_click((_e, cx) => { this.notice = null; cx.notify(); }).child(this.notice));
       })
-      .when(settledCount > 0, (el) => el.child(div().id("settled-undo").absolute().right(8).top(this.update || this.notice ? horizon + 84 : horizon + 6).px(8).py(3).rounded(8).bg("#11111bdd").border_1().border_color("#45475a").text_size(11).text_color("#a6e3a1").cursor_pointer()
+      .when(settledCount > 0, (el) => el.child(div().id("settled-undo").absolute().right(8).top(this.notice ? horizon + 84 : horizon + 6).px(8).py(3).rounded(8).bg("#11111bdd").border_1().border_color("#45475a").text_size(11).text_color("#a6e3a1").cursor_pointer()
         .tooltip("Bring settled staff back on every floor")
         .on_click((_e, cx) => { this.settled.clear(); try { localStorage.removeItem("settled"); } catch { /* storage disabled: next render retries */ } cx.notify(); })
         .child(`✓ ${settledCount} settled`)));

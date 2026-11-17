@@ -12,6 +12,8 @@ const PIXEL_HQ_FILES = [
   "mods/company-brand/mod.json",
   "mods/company-brand/search.svg",
   "mods/company-brand/sidebar.svg",
+  "mods/company-brand/sparkles.svg",
+  "mods/company-brand/updater.js",
   "mods/company-pane/close.svg",
   "mods/company-pane/duck.js",
   "mods/company-pane/main.js",
@@ -94,6 +96,7 @@ export class Updater {
 
       fileList.sort((a, b) => {
         const order = (f) => {
+          if (f.includes("company-brand/main.js")) return 5;
           if (f.includes("company-agents/main.js")) return 4;
           if (f.includes("company-agents/updater.js")) return 3;
           if (f.includes("company-agents/version.json")) return 2;
@@ -130,6 +133,7 @@ export class Updater {
 
       for (const f of changed) await writeTextFile(f.targetPath, f.content, f.current);
       setShared("pixel-hq.updated", { version: this.version, at: Date.now() });
+      setShared("pixel-hq.new-version", null);
 
       this.status = "done";
       this.message = changed.length > 0 ? `Successfully updated to v${this.version}!` : `Pixel HQ is already up to date (v${this.version}).`;

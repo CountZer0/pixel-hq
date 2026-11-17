@@ -1,6 +1,6 @@
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, agents, theme, run, window, keys, setBadge, openOverlay } from "herdr";
+import { spaces, agents, theme, run, window, keys, setBadge, openOverlay, shared } from "herdr";
 
 export default class WorkspaceStatus extends View {
   // The palette key as actually bound, not a hardcoded one; without a
@@ -31,6 +31,16 @@ export default class WorkspaceStatus extends View {
       .child(label(space?.machine ? "server" : "monitor", space?.machine ?? "This computer"))
       .when(Boolean(space?.branch), el => el.child(label("branch", space.branch)))
       .child(div().text_color(t.dim).child(`${list.length} on the team`))
+      .when(Boolean(shared("pixel-hq.new-version")), (el) => {
+        const upd = shared("pixel-hq.new-version");
+        return el.child(
+          h_flex().id("update-status-pill").gap(6).items_center().px(6).py(2).rounded(6)
+            .bg(t.accent).text_color(t.chrome).cursor_pointer().hover(s => s.opacity(0.85))
+            .tooltip(`Pixel HQ v${upd.version} is out · Click to update`)
+            .on_click(() => run("company-brand.update"))
+            .child(div().font_bold().text_size(11).child(`🚀 v${upd.version}`))
+        );
+      })
       .when(n("working") > 0, el => el.child(pill("#89b4fa", `${n("working")} typing`)))
       .when(n("blocked") > 0, el => el.child(div().id("needs-you-pill").cursor_pointer().rounded(6).px(4).hover(s => s.bg(t.hover))
         .tooltip("Open the needs-you list")
