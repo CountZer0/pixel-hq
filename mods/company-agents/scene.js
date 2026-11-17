@@ -23,13 +23,19 @@ function ledWall(x, w, base) {
   const o = [], top = 8, rw = w >= 64 ? snap(Math.min(28, w * 0.34)) : snap(w), rh = snap(base - top);
   // Server rack: a cabinet with a lit top cap, a darker side, a plinth with feet, and units of three kinds.
   o.push(r(x - 2, top - 2, rw + 4, rh + 2, "#0a0c1a"), r(x, top, rw, rh, "#1a1f3d"), r(x + rw - 3, top, 3, rh, "#12152c"), r(x, top, 1, rh, "#2c3366"),
-    r(x, top, rw, 3, "#2c3366"), r(x + 3, top + 4, rw - 8, 2, "#c7cde4"), r(x, base - 5, rw, 5, "#10132a"), r(x + 1, base - 1, 4, 1, "#3a3f66"), r(x + rw - 5, base - 1, 4, 1, "#3a3f66"));
-  const units = Math.max(3, Math.floor((rh - 20) / 11));
+    r(x, top, rw, 3, "#2c3366"), r(x + 3, top + 4, rw - 8, 5, "#0a0d26"), r(x + 3, top + 4, rw - 8, 1, "#3a4180"), r(x, base - 5, rw, 5, "#10132a"), r(x + 1, base - 1, 4, 1, "#3a3f66"), r(x + rw - 5, base - 1, 4, 1, "#3a3f66"));
+  for (let c = 0; c < Math.floor((rw - 12) / 2); c++) { const h = 1 + Math.floor(rnd(c * 3 + 1) * 3); o.push(r(x + 5 + c * 2, top + 8 - h, 1, h, c % 4 === 3 ? "#f9e2af" : "#a6e3a1")); }
+  o.push(r(x - 6, top - 4, rw + 12, rh + 4, "#a78bfa0b"));
+  const units = Math.max(3, Math.floor((rh - 22) / 11));
   for (let k = 0; k < units; k++) {
-    const uy = top + 9 + k * 11, ux = x + 3, uw = rw - 8, kind = k % 3, ledC = LIGHTS[[2, 2, 0, 3, 2, 1][k % 6]];
+    const uy = top + 11 + k * 11, ux = x + 3, uw = rw - 8, kind = k % 4, ledC = LIGHTS[[2, 2, 0, 3, 2, 1][k % 6]];
     o.push(r(ux, uy, uw, 9, "#252b52"), r(ux, uy, uw, 1, "#3a4180"), r(ux, uy + 8, uw, 1, "#0f1226"));
     if (kind === 0) for (let b = 0; b < Math.min(3, Math.floor((uw - 10) / 5)); b++) o.push(r(ux + 8 + b * 5, uy + 2, 4, 5, "#323a70"), r(ux + 8 + b * 5, uy + 2, 4, 1, "#4a529a"));
     else if (kind === 1) for (let v = 0; v < Math.floor((uw - 10) / 3); v++) o.push(r(ux + 8 + v * 3, uy + 2, 1, 5, "#10132a"));
+    else if (kind === 3) for (let q = 0; q < Math.floor((uw - 10) / 3); q++) {
+      const pc = rnd(k * 9 + q) > 0.5 ? "#8fcb4f" : "#f4a23a", port = r(ux + 8 + q * 3, uy + 3, 2, 3, pc);
+      o.push(r(ux + 8 + q * 3, uy + 6, 2, 1, "#10132a"), (q + k) % 3 === 0 ? port.loop("opacity", { from: 0.2, to: 1, period: 350 + ((q * 170 + k * 90) % 500), easing: "linear" }) : port);
+    }
     else for (let f = 0; f < (uw >= 28 ? 2 : 1); f++) o.push(r(ux + 8 + f * 8, uy + 2, 5, 5, "#10132a"), r(ux + 9 + f * 8, uy + 3, 3, 3, "#323a70"));
     o.push(r(ux + 1, uy + 2, 5, 5, ledC + "33"));
     const led = r(ux + 2, uy + 3, 3, 3, ledC);
@@ -47,19 +53,28 @@ function ledWall(x, w, base) {
     r(mx - 5, base - 3, mw + 10, 3, "#6fe0f01a"), r(mx - 2, deskY + 4, 2, base - deskY - 4, "#2a2e4a"), r(mx + mw, deskY + 4, 2, base - deskY - 4, "#2a2e4a"),
     r(mx - 4, base - 1, 6, 1, "#2a2e4a"), r(mx + mw - 2, base - 1, 6, 1, "#2a2e4a"), r(mx + 1, deskY + 5, mw - 2, 2, "#1c2038"),
     r(mx + mw - 16, deskY + 7, 14, 8, "#c9cee4"), r(mx + mw - 16, deskY + 7, 14, 1, "#e6e9f5"), r(mx + mw - 13, deskY + 10, 8, 1, "#7e86ad"), r(mx + mw - 13, deskY + 13, 8, 1, "#7e86ad"),
-    r(mx - 2, deskY + 4, mw + 4, 1, "#6fe0f0").loop("opacity", { from: 0.55, to: 1, period: 2400, easing: "ease-in-out" }),
+    r(mx - 2, deskY + 4, mw + 4, 1, "#6fe0f0").loop("opacity", { from: 0.3, to: 1, period: 2600, easing: "ease-in-out" }), r(mx - 2, deskY + 4, mw + 4, 1, "#c4a0ff").loop("opacity", { from: 1, to: 0.3, period: 2600, easing: "ease-in-out" }),
     // the monitor: bezel with a light top edge, a neck and a foot
-    r(mx - 3, my - 3, mw + 6, mh + 6, "#0a0c1a"), r(mx - 3, my - 3, mw + 6, 1, "#3a3f66"), r(mx, my, mw, mh, "#10143a"), r(mx, my + Math.floor(mh / 2), mw, Math.ceil(mh / 2), "#0e1233"),
+    r(mx - 3, my - 6, mw + 6, 2, "#f5c2e7").loop("opacity", { from: 0.2, to: 1, period: 2600, easing: "ease-in-out" }), r(mx - 3, my - 6, mw + 6, 2, "#89dceb").loop("opacity", { from: 1, to: 0.2, period: 2600, easing: "ease-in-out" }),
+    r(mx - 3, my - 3, mw + 6, mh + 6, "#0a0c1a"), r(mx + Math.floor(mw / 2) - 1, my - 2, 2, 1, "#4a5090"), r(mx - 3, my - 3, mw + 6, 1, "#3a3f66"), r(mx, my, mw, mh, "#10143a"), r(mx, my + Math.floor(mh / 2), mw, Math.ceil(mh / 2), "#0e1233"),
     r(mx + Math.floor(mw / 2) - 2, sy, 4, deskY - sy, "#0a0c1a"), r(mx + Math.floor(mw / 2) - 9, deskY - 3, 18, 3, "#0a0c1a"), r(mx + Math.floor(mw / 2) - 9, deskY - 3, 18, 1, "#3a3f66"),
     // title bar with three dots and a tab
     r(mx, my, mw, 5, "#232a5c"), r(mx + 2, my + 1, 3, 3, "#f38ba8"), r(mx + 7, my + 1, 3, 3, "#f9e2af"), r(mx + 12, my + 1, 3, 3, "#a6e3a1"), r(mx + 18, my + 1, Math.min(14, mw - 40), 4, "#10143a"),
     // status bar
     r(mx, my + mh - 4, mw, 4, "#1d2250"), r(mx + 2, my + mh - 3, 8, 2, "#89b4fa"), r(mx + 12, my + mh - 3, 6, 2, "#a6e3a1"), r(mx + mw - 9, my + mh - 3, 6, 2, "#f9e2af"),
     // keyboard, mouse, mug with steam
-    r(mx + 3, deskY - 3, Math.min(mw - 16, 26), 3, "#2a2f4f"), r(mx + 3, deskY - 3, Math.min(mw - 16, 26), 1, "#4a5090"), r(mx + mw - 12, deskY - 2, 4, 2, "#aab4d6"),
+    r(mx + 3, deskY - 3, Math.min(mw - 16, 26), 3, "#2a2f4f"), r(mx + 3, deskY - 3, Math.min(mw - 16, 26), 1, "#f5c2e7").loop("opacity", { from: 0.3, to: 1, period: 2600, easing: "ease-in-out" }), r(mx + 3, deskY - 3, Math.min(mw - 16, 26), 1, "#89dceb").loop("opacity", { from: 1, to: 0.3, period: 2600, easing: "ease-in-out" }), r(mx + mw - 12, deskY - 2, 4, 2, "#aab4d6"),
     r(mx + mw - 6, deskY - 5, 5, 5, "#e8e2d0"), r(mx + mw - 1, deskY - 4, 2, 3, "#e8e2d0"), r(mx + mw - 5, deskY - 5, 3, 1, "#6b4430"),
     r(mx + mw - 5, deskY - 9, 1, 3, "#cdd6f4").loop("opacity", { from: 0, to: 0.7, period: 1600, easing: "ease-in-out" }), r(mx + mw - 3, deskY - 11, 1, 3, "#cdd6f4").loop("opacity", { from: 0.6, to: 0, period: 1900, easing: "ease-in-out" }));
-  const rows = Math.floor((mh - 15) / 4), indents = [0, 1, 1, 2, 2, 1, 2, 0, 1, 2, 1, 0], right = mx + mw - 9;
+  // A terminal pane under the editor: a prompt, a build progress bar (its last segment blinks) and a couple of passed checks.
+  const edH = Math.floor((mh - 15) * 0.6), tY = my + 8 + edH + 2, tH = my + mh - 5 - tY;
+  if (tH >= 9) {
+    o.push(r(mx, tY, mw, tH, "#080b22"), r(mx, tY, mw, 1, "#2a3270"), r(mx + 2, tY + 3, 2, 2, "#f38ba8"), r(mx + 6, tY + 3, 10, 2, "#a6e3a1"));
+    const seg = Math.floor((mw - 6) / 3);
+    for (let q = 0; q < seg; q++) { const on = q < seg - 2, b = r(mx + 3 + q * 3, tY + 7, 2, 2, on ? "#a6e3a1" : "#1d2250"); o.push(q === seg - 3 ? b.loop("opacity", { from: 0.3, to: 1, period: 700, easing: "linear" }) : b); }
+    if (tH >= 14) o.push(r(mx + 2, tY + 11, 2, 2, "#a6e3a1"), r(mx + 6, tY + 11, 14, 2, "#4a529a"));
+  }
+  const rows = Math.floor(edH / 4), indents = [0, 1, 1, 2, 2, 1, 2, 0, 1, 2, 1, 0], right = mx + mw - 9;
   for (let row = 0; row < rows; row++) {
     const ry = my + 8 + row * 4;
     o.push(r(mx + 2, ry, 2, 2, "#3a3f66"));
@@ -73,7 +88,7 @@ function ledWall(x, w, base) {
       cx += pw + 2;
     }
   }
-  for (let m = 0; m < Math.floor((mh - 15) / 3); m++) o.push(r(mx + mw - 6, my + 8 + m * 3, 2 + Math.floor(rnd(m * 4 + 1) * 3), 1, "#4a529a"));
+  for (let m = 0; m < Math.floor(edH / 3); m++) o.push(r(mx + mw - 6, my + 8 + m * 3, 2 + Math.floor(rnd(m * 4 + 1) * 3), 1, "#4a529a"));
   o.push(r(mx + 7 + 4, my + 8 + Math.min(rows - 1, 3) * 4, 2, 2, "#cdd6f4").loop("opacity", { from: 0, to: 1, period: 900, easing: "ease-in-out" }));
   return o;
 }
