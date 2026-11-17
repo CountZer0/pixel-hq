@@ -36,6 +36,9 @@
 - **Pets that live their day.** When an agent goes idle its pet mostly stays at the desk; every so often one steps out beside it, stands there for a while, and comes back. When left idle for over 2 minutes it snoozes with floating pixel Zzz; after 5 minutes a retro pixel alarm clock rings and urges it back to work. Both clocks count from the last time you looked at that agent, so opening it and leaving without a task sends it back to a plain coffee break. Click an idle pet anytime to nudge it awake. When work arrives it types. When an agent ships, pixel confetti rains over its desk until you look.
 - **Desk nameplates on every pane.** The pane header shows the pet, its job title and a live status chip:
   `typing`, `needs you`, `shipped` or `on break`.
+- **HP and SP vitals.** Under every desk's nameplate, two thin bars span the nameplate width. **HP** is context used, drawn like Claude's status line: green, yellow from 60%, red from 80%. **SP** is the share of your 5-hour window left, as the status line reports it: blue while plenty, amber from 30%, red from 10%. Hover a desk for the exact numbers. The model and its effort ride along on the branch line (`main · Opus 5.5 · high`). Codex, OpenCode and Antigravity have no 5-hour source without calling their usage APIs, so their desks get the HP bar and papers, no SP bar.
+- **Needs you, one list.** The moment any agent on any floor or machine waits on you, a pixel bell appears in the header with the count (the status bar's `N need you` pill does the same, and on macOS the Dock badge carries the number too). Click it: the needs-you popup lists every waiting agent across every space and machine, longest first — the pet, its terminal title, its floor, its program and how long it has been waiting. Click a row and you land on its pane.
+- **Shipped staff can clock out.** Every shipped desk gets a green `✓` at its top-left corner. Click it and the pet is settled until its next task: the desk leaves the floor and its confetti stops. It comes back on its own the moment it works or waits on you again, and a `✓ N settled` chip on the floor brings everyone back at once.
 - **Find staff.** A search bar above the office: type a name, a job title (`reviewer`, `engineer`), a status (`typing`, `break`) or a space, and everyone who does not match fades out while matches get a yellow nameplate. Enter jumps to the first match.
 - **A team status bar.** "Pixel HQ", how many agents are on the team, and how many are typing, blocked, shipped or on break.
 - **A company sign.** The Pixel HQ corgi logo with "Pixel HQ / engineering floor" at the top of the sidebar.
@@ -93,7 +96,7 @@ Ask your agent:
 Or by hand: copy `layouts/`, `mods/` and `themes/` into `~/.config/herdr-app/`, quit and reopen Herdr once,
 then pick **pixel-hq** in Settings > Look. It brings its own **pixel-hq** theme, dark even when your system is in light mode.
 
-Mods are trusted code and Herdr does not sandbox them. This repo is about 2,000 lines of JavaScript. The only programs it runs are local helpers
+Mods are trusted code and Herdr does not sandbox them. This repo is about 4,200 lines of JavaScript. The only programs it runs are local helpers
 (`mkdir`, `cp`, `open`, `git` to see what each desk changed and to make worktrees when you hire, and Chrome/ImageMagick when you convert an animated picture in the figures editor). The one thing it writes outside its own folders is the OpenCode status plugin described below (only if OpenCode is installed, once, never overwriting). It only talks to GitHub: the update check reads one tiny public file, and pressing **Update now** downloads this repo's files (see "Update"). Nothing about you is sent. Read it before you install it.
 
 ## Update
@@ -108,13 +111,13 @@ What an update overwrites, and how to go back, is in [UPDATE.md](UPDATE.md).
 
 ## Papers on the desk
 
-As an agent's context fills up, a pile of paper grows on its desk: one sheet per 10%, and past 80% the top sheets turn pink (past 95% the pile trembles). Hover it for the exact percentage. **Click the pile, then click it again within 6 seconds**, and Pixel HQ sends the agent `/compact`, which already summarizes the conversation and swaps the history for that summary. It only does this when the agent is idle: a working agent answers "busy: wait for it", a blocked one "answer it first". The first click just arms it and says so on the nameplate.
+As an agent's context fills up, a pile of paper grows on its desk: one sheet per 10%, and past 80% the top sheets turn pink (past 95% the pile trembles). The same percentage feeds the HP bar (see "HP and SP vitals" above). Hover it for the exact percentage. **Click the pile, then click it again within 6 seconds**, and Pixel HQ sends the agent `/compact`, which already summarizes the conversation and swaps the history for that summary. It only does this when the agent is idle: a working agent answers "busy: wait for it", a blocked one "answer it first". The first click just arms it and says so on the nameplate.
 
 Herdr does not know how full an agent's context is, so each agent has its own way in:
 
 - **Codex:** nothing to set up. Pixel HQ reads the token count Codex writes to its session file (`~/.codex/sessions`, found through the process that has it open, or by folder) every few seconds. macOS and Linux (it needs `sh` and `lsof`).
 - **OpenCode (1.x):** nothing to set up either. The status plugin that Pixel HQ adds to OpenCode (see below) reports the last answer's tokens against the model's context window. OpenCode 2.x has no session events for a plugin to read, so no pile there yet.
-- **Claude Code:** a status line has to tell Herdr. [`claude-statusline.sh`](mods/company-agents/claude-statusline.sh) does that (it labels the terminal with the context percentage); it needs `python3`. Ask your agent:
+- **Claude Code:** a status line has to tell Herdr. [`claude-statusline.sh`](mods/company-agents/claude-statusline.sh) does that (it labels the terminal with the context percentage, how much of the 5-hour window is left and the effort level); it needs `python3`. Ask your agent:
 
 > Set my Claude Code status line (`statusLine` in `~/.claude/settings.json`) to `sh ~/.config/herdr-app/mods/company-agents/claude-statusline.sh`, keeping the rest of my settings. If I already have a status line, tell me first.
 

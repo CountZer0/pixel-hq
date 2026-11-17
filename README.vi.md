@@ -36,6 +36,9 @@
 - **Thú cưng sống trọn ngày của mình.** Khi agent rảnh, thú cưng phần lớn ngồi yên ở bàn; thỉnh thoảng một con đứng dậy ra cạnh bàn, đứng đó một lúc rồi quay lại. Khi idle quá 2 phút, nó ngủ gật với những chữ Zzz lơ lửng; sau 5 phút chiếc đồng hồ báo thức pixel rung chuông giục làm việc. Cả hai mốc đều tính từ lần cuối bạn xem agent đó, nên mở nó ra rồi rời đi mà không giao việc thì nó quay lại nghỉ cà phê bình thường. Click vào thú cưng bất kỳ lúc nào để đánh thức nó ("nudge"). Có việc là nó gõ phím. Khi agent ship xong, pháo giấy pixel rơi xuống bàn nó cho tới khi bạn ghé nhìn.
 - **Bảng tên trên mọi pane.** Header của pane hiện thú cưng, chức danh và một chip trạng thái trực tiếp:
   `typing`, `needs you`, `shipped` hoặc `on break`.
+- **Chỉ số HP và SP.** Dưới bảng tên của mỗi bàn là hai thanh mỏng. **HP** là mức context đã dùng, tô màu như status line của Claude: xanh lá, vàng từ 60%, đỏ từ 80%. **SP** là phần cửa sổ 5 giờ còn lại, đúng như status line báo: xanh dương khi còn nhiều, hổ phách từ 30%, đỏ từ 10%. Di chuột lên bàn để xem con số chính xác. Model và mức effort của nó hiện trên dòng branch (`main · Opus 5.5 · high`). Codex, OpenCode và Antigravity không có nguồn quota 5 giờ nếu không gọi usage API của họ, nên bàn của họ chỉ có thanh HP và chồng giấy, không có bar SP.
+- **Cần bạn, chỉ một danh sách.** Ngay khi có agent ở bất kỳ tầng hay máy nào chờ bạn, một chiếc chuông pixel hiện lên trong header kèm số đếm (pill `N need you` trên thanh trạng thái cũng mở danh sách đó, và trên macOS badge Dock hiển thị con số). Click vào: hộp "needs-you" liệt kê mọi agent đang chờ trên mọi space và máy, lâu nhất trước — thú cưng, tiêu đề terminal, tầng làm việc, chương trình và đã chờ bao lâu. Click một dòng là nhảy thẳng tới pane của nó.
+- **Nhân viên đã ship có thể "clock out".** Mỗi bàn ship xong được một nút `✓` xanh lá ở góc trên-trái. Click vào, pet sẽ được "settle" tới khi nhận task tiếp theo: bàn biến mất khỏi tầng và pháo giấy dừng rơi. Nó tự quay lại ngay khi nó hoạt động hoặc cần bạn, và một chip `✓ N settled` trong văn phòng mang mọi người trở lại cùng lúc.
 - **Tìm nhân viên.** Ô tìm kiếm phía trên văn phòng: gõ tên, chức danh (`reviewer`, `engineer`), trạng thái (`typing`, `break`) hoặc tên space, ai không khớp sẽ mờ đi còn ai khớp sẽ có bảng tên màu vàng. Nhấn Enter để nhảy tới kết quả đầu tiên.
 - **Thanh trạng thái của team.** "Pixel HQ", team có bao nhiêu agent, và bao nhiêu agent đang gõ, đang chờ bạn, đã ship hoặc đang nghỉ giải lao.
 - **Biển hiệu công ty.** Logo chú corgi của Pixel HQ cùng dòng "Pixel HQ / engineering floor" ở đầu sidebar.
@@ -93,7 +96,7 @@ Nhờ agent của bạn:
 Hoặc làm tay: chép `layouts/`, `mods/` và `themes/` vào `~/.config/herdr-app/`, thoát rồi mở lại Herdr một lần,
 sau đó chọn **pixel-hq** trong Settings > Look. Layout tự mang theme **pixel-hq**, luôn tối kể cả khi hệ thống đang ở chế độ sáng.
 
-Mod là code được tin cậy và Herdr không chạy chúng trong sandbox. Repo này có khoảng 2.000 dòng JavaScript. Các chương trình duy nhất nó chạy là các công cụ cục bộ
+Mod là code được tin cậy và Herdr không chạy chúng trong sandbox. Repo này có khoảng 4.200 dòng JavaScript. Các chương trình duy nhất nó chạy là các công cụ cục bộ
 (`mkdir`, `cp`, `open`, `git` để xem mỗi bàn đã sửa gì và tạo worktree khi bạn thuê staff, và Chrome/ImageMagick khi bạn chuyển đổi ảnh động trong trình chỉnh figures). Điều duy nhất nó ghi ra ngoài thư mục của mình là plugin trạng thái OpenCode ở mục bên dưới (chỉ khi máy có OpenCode, một lần, không ghi đè). Nó chỉ kết nối tới GitHub: phần kiểm tra cập nhật đọc một file công khai rất nhỏ, còn khi bạn bấm **Update now** thì nó tải các file của repo này (xem "Cập nhật"). Nó không gửi gì về bạn. Hãy đọc code trước khi cài.
 
 ## Cập nhật
@@ -108,13 +111,13 @@ Những gì cập nhật sẽ ghi đè và cách quay lại bản cũ nằm tron
 
 ## Giấy tờ trên bàn
 
-Khi context của agent đầy lên, một chồng giấy cao dần trên bàn của nó: cứ 10% thêm một tờ, quá 80% mấy tờ trên cùng ngả hồng (quá 95% chồng giấy rung). Rê chuột lên để xem phần trăm chính xác. **Bấm vào chồng giấy, rồi bấm lần nữa trong 6 giây**, Pixel HQ sẽ gửi cho agent lệnh `/compact`, vốn đã tự tóm tắt cuộc trò chuyện rồi thay lịch sử bằng bản tóm tắt. Chỉ làm khi agent đang rảnh: agent đang chạy sẽ báo "busy: wait for it", agent đang chờ bạn trả lời báo "answer it first". Lần bấm đầu chỉ lên cò và hiện lời nhắc trên biển tên.
+Khi context của agent đầy lên, một chồng giấy cao dần trên bàn của nó: cứ 10% thêm một tờ, quá 80% mấy tờ trên cùng ngả hồng (quá 95% chồng giấy rung). Cùng phần trăm đó cũng nuôi thanh HP (xem "Chỉ số HP và SP" ở trên). Rê chuột lên để xem phần trăm chính xác. **Bấm vào chồng giấy, rồi bấm lần nữa trong 6 giây**, Pixel HQ sẽ gửi cho agent lệnh `/compact`, vốn đã tự tóm tắt cuộc trò chuyện rồi thay lịch sử bằng bản tóm tắt. Chỉ làm khi agent đang rảnh: agent đang chạy sẽ báo "busy: wait for it", agent đang chờ bạn trả lời báo "answer it first". Lần bấm đầu chỉ lên cò và hiện lời nhắc trên biển tên.
 
 Herdr không biết context của agent đầy bao nhiêu, nên mỗi agent có một đường riêng:
 
 - **Codex:** không cần cài gì. Pixel HQ đọc số token mà Codex ghi vào file phiên của nó (`~/.codex/sessions`, tìm qua tiến trình đang mở file đó, hoặc theo thư mục) mỗi vài giây. Chạy trên macOS và Linux (cần `sh` và `lsof`).
 - **OpenCode (1.x):** cũng không cần cài gì. Plugin trạng thái mà Pixel HQ thêm vào OpenCode (xem mục bên dưới) báo số token của câu trả lời gần nhất so với cửa sổ context của model. OpenCode 2.x không có sự kiện phiên cho plugin đọc, nên chưa có chồng giấy ở đó.
-- **Claude Code:** cần status line báo cho Herdr. [`claude-statusline.sh`](mods/company-agents/claude-statusline.sh) làm việc đó (gắn nhãn phần trăm context cho terminal); cần `python3`. Nhờ agent của bạn:
+- **Claude Code:** cần status line báo cho Herdr. [`claude-statusline.sh`](mods/company-agents/claude-statusline.sh) làm việc đó (gắn nhãn phần trăm context, phần cửa sổ 5 giờ còn lại và mức effort cho terminal); cần `python3`. Nhờ agent của bạn:
 
 > Set my Claude Code status line (`statusLine` in `~/.claude/settings.json`) to `sh ~/.config/herdr-app/mods/company-agents/claude-statusline.sh`, keeping the rest of my settings. If I already have a status line, tell me first.
 
