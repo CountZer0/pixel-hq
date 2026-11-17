@@ -77,16 +77,19 @@ function duration(ms) {
   return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d`;
 }
 
-// A thin context-use bar with its %, colored like Claude's status line:
-// green, yellow from 60%, red from 80%.
-// Then the model, when the status line reported one.
-function contextBar(t, pct, model, address) {
-  const color = pct >= 80 ? t.ansi1 : pct >= 60 ? t.ansi3 : t.ansi2;
-  return h_flex().id(`ctx-${address}`).mt(2).gap(5).items_center().tooltip(`Context ${pct}% used${model ? ` · ${model}` : ""}`)
-    .child(div().w(72).h(3).flex_none().rounded(2).bg(t.border)
-      .child(div().h_full().rounded(2).bg(color).w(Math.max(2, (72 * pct) / 100))))
-    .child(div().flex_none().text_size(10).text_color(t.dim).child(`${pct}%`))
-    .when(Boolean(model), el => el.child(div().min_w(0).truncate().text_size(10).text_color(t.muted).child(`· ${model}`)));
+function thinBar(t, pct, color, width) {
+  const fill = pct > 0 ? Math.max(2, Math.round((width * pct) / 100)) : 0;
+  return div().w(width).h(3).flex_none().rounded(2).bg(t.border)
+    .child(div().h_full().rounded(2).bg(color).w(fill));
+}
+const hpColor = (t, pct) => (pct >= 80 ? t.ansi1 : pct >= 60 ? t.ansi3 : t.ansi2);
+const spColor = (t, left) => (left <= 10 ? t.ansi1 : left <= 30 ? t.ansi3 : "#89b4fa");
+const modelOf = (ctx) => (ctx.model ? [ctx.model, ctx.effort].filter(Boolean).join(" · ") : ctx.effort ? `effort ${ctx.effort}` : "");
+const vitalsTip = (ctx) => [ctx.pct != null ? `Context ${ctx.pct}% used` : null, ctx.quota != null ? `${ctx.quota}% of the quota window left` : null, modelOf(ctx)].filter(Boolean).join(" · ");
+function vitalsBars(t, ctx, id, width) {
+  return v_flex().id(id).gap(2)
+    .when(ctx.pct != null, (el) => el.child(thinBar(t, ctx.pct, hpColor(t, ctx.pct), width)))
+    .when(ctx.quota != null, (el) => el.child(thinBar(t, ctx.quota, spColor(t, ctx.quota), width)));
 }
 
 // Finds a Codex terminal's session file (the one its process, or a child of it, has open; else the newest recent one that began in the
@@ -103,24 +106,41 @@ fi
 [ -n "$f" ] || exit 3
 tail -n 600 "$f" | grep '"type":"token_count"' | tail -1`;
 
-// Finds an Antigravity terminal's transcript file and prints its last planner response with token usage.
-const AGY_SH = `home="\${AGY_HOME:-$HOME/.gemini/antigravity-cli}"
-pids="$1"; for i in 1 2 3; do pids="$pids $(for p in $pids; do pgrep -P "$p" 2>/dev/null; done)"; done
-cid=""
-if [ -n "$1" ]; then
-  lock=$(lsof -p "$(echo $pids | tr -s ' ' ',')" 2>/dev/null | grep -o '/presence/.*\\.lock' | head -1)
-  [ -n "$lock" ] && cid=$(basename "$lock" .lock)
-fi
-if [ -z "$cid" ] && [ -f "$home/history.jsonl" ]; then
-  cid=$(grep -F '"workspace":"'"$2"'"' "$home/history.jsonl" 2>/dev/null | tail -1 | grep -o '"conversationId":"[^"]*"' | cut -d'"' -f4)
-fi
-[ -n "$cid" ] || exit 3
-f="$home/brain/$cid/.system_generated/logs/transcript.jsonl"
-[ -f "$f" ] || exit 3
-tail -n 300 "$f" | grep '"input_tokens":' | tail -1`;
+// Reads the Antigravity transcript for a workspace: the last conversation the CLI logged for it, then the last
+// usage line with token counts. Pure file reads through the mod's own file API, so it behaves the same on every
+// platform (the former lsof-based path needed sh and Unix).
+const homeDir = () => process.env.HOME ?? process.env.USERPROFILE ?? "";
+const agyHome = () => process.env.AGY_HOME ?? `${homeDir()}/.gemini/antigravity-cli`;
+const agyTranscriptVitals = async (cwd) => {
+  if (!cwd) return null;
+  let hist;
+  try { hist = await readTextFile(`${agyHome()}/history.jsonl`); } catch { return null; }
+  const needle = `"workspace":${JSON.stringify(cwd)}`;
+  let conversationId = null;
+  for (const line of String(hist).split("\n")) {
+    if (!line.includes(needle)) continue;
+    const m = line.match(/"conversationId":"([^"]+)"/);
+    if (m) conversationId = m[1];
+  }
+  if (!conversationId) return null;
+  let transcript;
+  try { transcript = await readTextFile(`${agyHome()}/brain/${conversationId}/.system_generated/logs/transcript.jsonl`); } catch { return null; }
+  const lines = String(transcript).split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].includes('"input_tokens":')) continue;
+    try {
+      const ev = JSON.parse(lines[i]);
+      const used = (Number(ev?.input_tokens) || 0) + (Number(ev?.cache_read_tokens) || 0);
+      if (!(used > 0)) return null;
+      return { pct: Math.max(0, Math.min(100, Math.round((used * 100) / 1000000))), model: ev?.model ?? "agy" };
+    } catch { return null; }
+  }
+  return null;
+};
 
 export default class Agents extends View {
   init(_props, cx) {
+    if (props()?.needsYou) return;
     if (props()?.sortMenu) return;
     if (props()?.figures) { this.editor = new Editor(cx); return; }
     if (props()?.updateModal) { this.updater = new Updater(cx); return; }
@@ -162,12 +182,15 @@ export default class Agents extends View {
     this.scanCodex(cx);
     cx.timer.every(8000, (cx) => this.scanCodex(cx));
     // `company-agents.hire` (a key binding, or herdr-app do) opens the hire form.
-    cx.spawn(async (cx) => { for (;;) { const c = await nextCommand(); if (c === "hire") this.openHire(cx); if (c === "update") this.runUpdate(); } });
+    cx.spawn(async (cx) => { for (;;) { const c = await nextCommand(); if (c === "hire") this.openHire(cx); if (c === "update") this.runUpdate(); if (c === "needsYou") this.openNeedsYou(); } });
     // OpenCode 1.x does not report a status by itself, so without help it never gets a desk. Once, if OpenCode is installed, drop its
     // status plugin (this mod's opencode-status.js) into OpenCode's plugins folder. Only ever replaces Pixel HQ's own older copy;
     // deleting the file removes it for good.
     this.notice = null;
     this.setupOpenCode(cx);
+    // The OpenCode HP plugin (directory package) is auto-discovered by every TUI from the global plugins folder:
+    // it labels the terminal with the context fill for the desk's HP bar. Same discipline as the status plugin.
+    this.setupOpenCodeHp(cx);
     // Tell the person when a newer Pixel HQ is out: read the tiny version.json from GitHub at start and every 6 hours.
     // Nothing is sent. Deleting this mod's own version.json turns the check off.
     this.update = null;
@@ -198,6 +221,7 @@ export default class Agents extends View {
     // Each agent's last state and when it changed (ms), kept across restarts.
     this.changed = JSON.parse(localStorage.getItem("changed") ?? "{}");
     try { this.seen = JSON.parse(localStorage.getItem("seen") ?? "{}"); } catch { this.seen = {}; }
+    try { this.settled = new Set(JSON.parse(localStorage.getItem("settled") ?? "[]")); } catch { this.settled = new Set(); }
     this.watching = null;
     this.pendingPins = JSON.parse(localStorage.getItem("pins") ?? "[]");
     if (!this.pendingPins.length) localStorage.removeItem("pins");
@@ -219,7 +243,9 @@ export default class Agents extends View {
     // Gone and old: the list alone is empty right after a start.
     const listed = new Set(list.map((a) => a.address));
     for (const [k, c] of Object.entries(this.changed)) if (!listed.has(k) && now - c.at > 30 * 86400000) delete this.changed[k];
-    localStorage.setItem("changed", JSON.stringify(this.changed));
+    try { localStorage.setItem("changed", JSON.stringify(this.changed)); } catch { /* storage blocked: the shared stamps still carry for this session */ }
+    // The floor copy and the needs-you popup are separate copies with separate storage: share the stamps so the popup sorts truthfully.
+    setShared("pixel-hq.changed", this.changed);
   }
 
   // Keep offline pins until their terminal returns, and keep each pending until
@@ -304,6 +330,66 @@ export default class Agents extends View {
         .when(s.id === on, (el) => el.child(svg("mods/workspace-chrome/check.svg").size(14).flex_none().text_color(t.foreground)))));
   }
 
+  needsYou(t) {
+    const now = Date.now();
+    const raw = shared("pixel-hq.changed");
+    const changed = raw && typeof raw === "object" ? raw : {};
+    const stamp = (a) => changed[a.address]?.at ?? null;
+    const waiting = agents()
+      .filter((a) => a.status === "blocked")
+      .sort((a, b) => {
+        const [sa, sb] = [stamp(a), stamp(b)];
+        if (sa !== null && sb !== null) return sa - sb;
+        if (sa !== null) return -1;
+        if (sb !== null) return 1;
+        return a.seq - b.seq;
+      });
+    const mono = "JetBrains Mono";
+    const paneList = panes();
+    const leads = leadPanes(paneList);
+    const tabs = new Map(spaces().flatMap((s) => s.tabs).map((tab) => [tab.id, tab]));
+    const tabCounts = new Map();
+    for (const a of waiting) tabCounts.set(a.tab, (tabCounts.get(a.tab) ?? 0) + 1);
+    const nameOf = (a) => {
+      const tab = tabs.get(a.tab);
+      const many = (tabCounts.get(a.tab) ?? 0) > 1;
+      const label = tab ? title(many ? { ...tab, named: false } : tab, many ? a : leads.get(a.tab)) : (clean(a.title) || a.program?.name || a.tab_name || a.address);
+      return /^\d+$/.test(label) ? (a.program?.name || label) : label;
+    };
+    return v_flex()
+      .w_full()
+      .p(6)
+      .bg(t.popover)
+      .overflow_y_scrollbar()
+      .child(h_flex().px(6).pt(2).pb(6).gap(8).items_center()
+        .child(div().font_family(mono).font_bold().text_size(10).text_color("#f9e2af").child("NEEDS YOU"))
+        .when(waiting.length > 0, (el) => el.child(div().text_size(10).text_color(t.dim).child(`${waiting.length} waiting · longest first`))))
+      .when(waiting.length === 0, (el) => el.child(div().px(10).py(18).text_size(12).text_color(t.dim).child("All hands on deck. Nobody needs you right now.")))
+      .children(waiting.map((a) => {
+        const at = stamp(a);
+        const name = nameOf(a);
+        const sub = [a.space_name, a.program?.name, at ? `waiting ${duration(now - at)}` : null].filter(Boolean).join(" · ");
+        return h_flex()
+          .id(`ny-${a.address}`)
+          .h(52)
+          .px(6)
+          .gap(8)
+          .rounded(8)
+          .items_center()
+          .cursor_pointer()
+          .hover((s) => s.bg(t.hover))
+          .on_click(() => {
+            run("pane.focus", { pane: a.pane });
+            closeOverlay(props().overlay);
+          })
+          .child(div().flex_none().child(figureFor(a.space_name, "blocked", 34, at ? Math.max(0, now - at) : 0, speciesOf(a.program?.key))))
+          .child(v_flex().flex_1().min_w(0).gap(1)
+            .child(div().truncate().text_size(12.5).text_color(t.foreground).child(name))
+            .child(div().truncate().text_size(10.5).text_color(t.muted).child(sub)))
+          .child(div().flex_none().text_size(14).text_color("#89b4fa").child("→"));
+      }));
+  }
+
   peek(addr) {
     run("terminal.peek", { terminal: addr });
   }
@@ -380,13 +466,15 @@ export default class Agents extends View {
   }
 
   async scanCodex(cx) {
-    if (this.scanningCodex || window()?.platform === "windows") return;
+    if (this.scanningCodex) return;
     this.scanningCodex = true;
+    const isWin = window()?.platform === "windows";
     try {
       const remote = new Set(spaces().filter((x) => x.machine).map((x) => x.id));
       const paneBy = new Map(panes().map((p) => [p.pane, p]));
       const next = new Map();
-      for (const a of agents().filter((x) => String(x.program?.key ?? "").toLowerCase().includes("codex") && !remote.has(x.space))) {
+      // Codex's session scan needs sh and lsof: POSIX only.
+      for (const a of isWin ? [] : agents().filter((x) => String(x.program?.key ?? "").toLowerCase().includes("codex") && !remote.has(x.space))) {
         const info = JSON.parse((await hc(["get", a.address, "--json"]).catch(() => ({ stdout: "{}" }))).stdout || "{}");
         const pid = info?.foreground?.pid;
         const cwd = paneBy.get(a.pane)?.cwd;
@@ -398,15 +486,11 @@ export default class Agents extends View {
       }
       for (const a of agents().filter((x) => (String(x.program?.key ?? "").toLowerCase().includes("antigravity") || x.program?.key === "agy") && !remote.has(x.space))) {
         try {
-          const info = JSON.parse((await hc(["get", a.address, "--json"]).catch(() => ({ stdout: "{}" }))).stdout || "{}");
-          const pid = info?.foreground?.pid;
           const cwd = paneBy.get(a.pane)?.cwd;
-          if (!pid && !cwd) continue;
-          const r = await exec("sh", ["-c", AGY_SH, "sh", String(pid ?? ""), cwd ?? "/dev/null/none"], { timeout: 8000 }).catch(() => null);
-          const ev = r?.code === 0 && r.stdout ? JSON.parse(r.stdout.trim().split("\n").pop()) : null;
-          const used = (ev?.input_tokens ?? 0) + (ev?.cache_read_tokens ?? 0);
-          const win = 1000000;
-          if (used > 0) next.set(a.address, { pct: Math.max(0, Math.min(100, Math.round((used * 100) / win))), model: ev?.model ?? "agy" });
+          const quota = await this.agyQuota();
+          const vitals = await agyTranscriptVitals(cwd);
+          if (!vitals && quota == null) continue;
+          next.set(a.address, { pct: vitals?.pct ?? null, model: vitals?.model ?? "agy", quota });
         } catch {
           continue;
         }
@@ -415,6 +499,35 @@ export default class Agents extends View {
       if (sig !== JSON.stringify([...this.ctxRead])) { this.ctxRead = next; cx.notify(); }
     } catch { /* no codex/agy, no lsof, odd output: no pile */ }
     this.scanningCodex = false;
+  }
+
+  async agyQuota() {
+    const memo = this.agyQuotaMemo;
+    if (memo && Date.now() - memo.at < 60000) return memo.value;
+    if (this.agyQuotaBusy) return memo?.value ?? null;
+    this.agyQuotaBusy = true;
+    let value = memo?.value ?? null;
+    try {
+      const script = `${appHome()}/mods/company-agents/agy-quota.py`;
+      const candidates = window()?.platform === "windows" ? ["python", "python3", "py"] : ["python3", "python"];
+      for (const bin of candidates) {
+        const r = await exec(bin, [script], { timeout: 12000 }).catch(() => null);
+        if (!r) continue;
+        const parsed = r.code === 0 && r.stdout ? JSON.parse(r.stdout.trim().split("\n").pop()) : null;
+        if (parsed && typeof parsed.quota === "number" && Number.isFinite(parsed.quota)) {
+          value = Math.max(0, Math.min(100, Math.round(parsed.quota)));
+        }
+        break;
+      }
+    } catch { /* keep the previous answer */ }
+    this.agyQuotaMemo = { at: Date.now(), value };
+    this.agyQuotaBusy = false;
+    return value;
+  }
+
+  openNeedsYou() {
+    const n = agents().filter((a) => a.status === "blocked").length;
+    openOverlay({ mod: "company-agents", kind: "popup", width: 340, height: Math.min(440, Math.max(150, 52 + n * 56)), props: { needsYou: true } });
   }
 
   openHire(cx) {
@@ -533,9 +646,33 @@ export default class Agents extends View {
     if (r.code === 5) { this.notice = "OpenCode plugin updated · restart OpenCode to apply"; cx.notify(); }
   }
 
+  async setupOpenCodeHp(cx) {
+    const src = `${appHome()}/mods/company-agents/opencode-hp`;
+    const had = localStorage.getItem("oc-hp-plugin") ? "1" : "0";
+    // Exit codes mirror setupOpenCode: 0 added, 3 no OpenCode folder, 4 nothing to do, 5 updated to a newer version of this plugin.
+    const sh = 'SRC="$1"; D="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"; [ -d "$D" ] || exit 3; T="$D/plugins/pixel-hq-hp"; '
+      + 'if [ -d "$T" ]; then grep -q "pixel-hq-opencode-hp" "$T/tui.tsx" 2>/dev/null || exit 4; '
+      + '[ "$(grep -o "pixel-hq-opencode-hp v[0-9]*" "$T/tui.tsx" | head -1)" = "$(grep -o "pixel-hq-opencode-hp v[0-9]*" "$SRC/tui.tsx" | head -1)" ] && exit 4; '
+      + 'rm -rf "$T" && cp -r "$SRC" "$T" || exit 1; exit 5; fi; [ "$2" = 1 ] && exit 4; mkdir -p "$D/plugins" || exit 1; cp -r "$SRC" "$T" || exit 1';
+    const ps = "param($src, $had); $c = if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { Join-Path $env:USERPROFILE '.config' }; $d = Join-Path $c 'opencode'; "
+      + "if (-not (Test-Path -LiteralPath $d)) { exit 3 }; $p = Join-Path $d 'plugins'; $t = Join-Path $p 'pixel-hq-hp'; "
+      + "if (Test-Path -LiteralPath $t) { $cur = Get-Content -Raw -LiteralPath (Join-Path $t 'tui.tsx') -ErrorAction Stop; if ($cur -notmatch 'pixel-hq-opencode-hp') { exit 4 }; "
+      + "$a = [regex]::Match($cur, 'pixel-hq-opencode-hp v\\d+').Value; $b = [regex]::Match((Get-Content -Raw -LiteralPath (Join-Path $src 'tui.tsx')), 'pixel-hq-opencode-hp v\\d+').Value; "
+      + "if ($a -eq $b) { exit 4 }; Remove-Item -LiteralPath $t -Recurse -Force; Copy-Item -Recurse -LiteralPath $src -Destination $t -ErrorAction Stop; exit 5 }; "
+      + "if ($had -eq '1') { exit 4 }; New-Item -ItemType Directory -Force -Path $p | Out-Null; Copy-Item -Recurse -LiteralPath $src -Destination $t -ErrorAction Stop";
+    const r = await (window()?.platform === "windows"
+      ? exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", `& { ${ps} } '${src.replace(/'/g, "''")}' '${had}'`])
+      : exec("sh", ["-c", sh, "sh", src, had])).catch(() => null);
+    if (!r || ![0, 4, 5].includes(r.code)) return;
+    localStorage.setItem("oc-hp-plugin", "1");
+    if (r.code === 0) { this.notice = "OpenCode HP plugin added"; cx.notify(); }
+    if (r.code === 5) { this.notice = "OpenCode HP plugin updated"; cx.notify(); }
+  }
+
   render(cx) {
     const t = theme();
     if (props()?.sortMenu) return this.sortMenu(t);
+    if (props()?.needsYou) return this.needsYou(t);
     if (this.editor) return this.editor.render(cx);
     if (this.updater) return this.updater.render(cx);
     const dismissed = shared("pixel-hq.dismissed-version") || localStorage.getItem("upd-dismissed");
@@ -545,6 +682,16 @@ export default class Agents extends View {
     const collapsed = narrow();
     const sort = sortOf();
     let list = agents();
+    const blockedAll = list.filter((a) => a.status === "blocked");
+    let settleDirty = false;
+    for (const a of list) if ((a.status === "working" || a.status === "blocked") && this.settled.delete(a.address)) settleDirty = true;
+    const live = new Set(list.map((a) => a.address));
+    for (const s of [...this.settled]) if (!live.has(s)) { this.settled.delete(s); settleDirty = true; }
+    if (settleDirty) { try { localStorage.setItem("settled", JSON.stringify([...this.settled])); } catch { /* storage full: retry next render */ } }
+    const settledCount = list.filter((a) => this.settled.has(a.address)).length;
+    const settledBySpace = new Map();
+    for (const a of list) if (this.settled.has(a.address)) settledBySpace.set(a.space, (settledBySpace.get(a.space) ?? 0) + 1);
+    list = list.filter((a) => !this.settled.has(a.address));
     this.listed = new Map(list.map((a) => [a.address, a.status]));
     const all = terminals();
     this.migratePins(all);
@@ -559,6 +706,7 @@ export default class Agents extends View {
     list = list.filter((a) => a.pinned || !nested.has(a.address));
     // Each floor is its own office: only the agents of the shown space sit here.
     const activeId = spaces().find((x) => x.active)?.id;
+    const settledFloor = activeId ? (settledBySpace.get(activeId) ?? 0) : settledCount;
     if (activeId) list = list.filter((a) => a.space === activeId);
     const tabCounts = new Map();
     for (const a of list) tabCounts.set(a.tab, (tabCounts.get(a.tab) ?? 0) + 1);
@@ -623,16 +771,36 @@ export default class Agents extends View {
       if (detail.get(a.address) == null && seen[`${a.space_name}\u0000`] > 1) detail.set(a.address, label(a));
     }
 
-    // Context use (0–100) and model that Claude's status line labels its terminal with.
+    // Labels are program-scoped: claude.* only while Claude is the foreground program, or a
+    // recycled pane would forever show the previous session's numbers.
     const contextOf = new Map(all.flatMap((k) => {
-      const v = Number.parseInt(k.labels?.["agent.context"] ?? k.labels?.["claude.context"], 10);
-      return Number.isFinite(v) ? [[k.address, { pct: Math.max(0, Math.min(100, v)), model: k.labels?.["agent.model"] || k.labels?.["claude.model"] || null }]] : [];
+      const labels = k.labels ?? {};
+      const prog = String(k.program?.key ?? k.report?.app ?? "").toLowerCase();
+      const isClaude = /claude/.test(prog);
+      const own = isClaude ? labels["claude.context"] ?? labels["agent.context"] : labels["agent.context"];
+      const model = isClaude ? (labels["claude.model"] || labels["agent.model"] || null) : (labels["agent.model"] || null);
+      const v = Number.parseInt(own, 10);
+      const q = Number.parseInt((isClaude ? labels["claude.quota"] ?? labels["agent.quota"] : labels["agent.quota"]), 10);
+      if (!Number.isFinite(v) && !Number.isFinite(q)) return [];
+      return [[k.address, {
+        pct: Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : null,
+        model,
+        quota: Number.isFinite(q) ? Math.max(0, Math.min(100, q)) : null,
+        effort: (isClaude ? labels["claude.effort"] || labels["agent.effort"] : labels["agent.effort"]) || null,
+      }]];
     }));
-    for (const [addr, c] of this.ctxRead) if (!contextOf.has(addr)) contextOf.set(addr, c);
+    for (const [addr, c] of this.ctxRead) {
+      const prev = contextOf.get(addr);
+      contextOf.set(addr, {
+        pct: c.pct ?? prev?.pct ?? null,
+        model: c.model ?? prev?.model ?? null,
+        quota: c.quota ?? prev?.quota ?? null,
+        effort: prev?.effort ?? null,
+      });
+    }
 
     const row = (a, i, subs = []) => {
       const pic = figureFor(a.space_name, a.status, 45, this.waitOf(a.address, a.status, now), speciesOf(a.program?.key));
-      const ctx = contextOf.get(a.address);
       const more = detail.get(a.address);
       // An agent on another machine (`vps/t7`) says which.
       const machine = a.address.includes("/") ? a.address.split("/")[0] : null;
@@ -704,8 +872,7 @@ export default class Agents extends View {
           })).child(pic))
         .child(v_flex().flex_1().min_w(0).gap(1)
           .child(div().min_w(0).truncate().text_color(idle ? t.muted : t.foreground).child(name))
-          .when(full && Boolean(more), el => el.child(div().min_w(0).truncate().text_size(11.5).text_color(t.dim).child(more)))
-          .when(ctx != null, el => el.child(contextBar(t, ctx.pct, ctx.model, a.address))))
+          .when(full && Boolean(more), el => el.child(div().min_w(0).truncate().text_size(11.5).text_color(t.dim).child(more))))
         .when(Boolean(machine), el => el.child(div().text_size(10).text_color(t.dim).child(machine)))
         .when(subs.length > 0, el => el.child(fold(a, subs)))
         .when(this.hovered === a.address, el => el.child(pin))
@@ -762,11 +929,15 @@ export default class Agents extends View {
     const nAgents = list.length;
     const paneBy = new Map(panes().map((p) => [p.pane, p]));
     const withBranch = list.some((a) => paneBy.get(a.pane)?.branch);
-    const plan = (sc) => {
-      const P = Math.round(46 * sc), pw = duckWidth(P), cw = Math.max(pw + Math.round(24 * sc), 76), ch = P + Math.round(28 * sc) + 26 + (withBranch ? 15 : 0);
+    const withVitals = list.some((a) => contextOf.get(a.address));
+    const plan = (sc, extraVitals) => {
+      const P = Math.round(46 * sc), pw = duckWidth(P), cw = Math.max(pw + Math.round(24 * sc), 76), ch = P + Math.round(28 * sc) + 26 + (withBranch ? 15 : 0) + extraVitals;
       return { sc, P, pw, cw, ch, cols: Math.max(1, Math.floor((sz.width - 8) / cw)), rows: Math.max(1, Math.floor((sz.height - fieldTop - 4) / ch)) };
     };
-    const P0 = [1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.42].map(plan);
+    const scales = [1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.42];
+    const base = scales.map((s) => plan(s, 0));
+    const vitalsOn = withVitals && (base.find((p) => p.cols * p.rows >= nAgents) ?? base[base.length - 1]).cw >= 90;
+    const P0 = scales.map((s) => plan(s, vitalsOn ? 11 : 0));
     const pick = P0.find((p) => p.cols * p.rows >= nAgents) ?? P0[P0.length - 1];
     const S = pick.sc, PET = pick.P, petW = pick.pw, cellW = pick.cw, cellH = pick.ch;
     const kk = (v) => Math.round(v * S);
@@ -810,7 +981,9 @@ export default class Agents extends View {
       const left = own ? own[0] * sz.width : Math.max(2, Math.min(sz.width - petW - 2, sz.width * Math.min(0.92, sx + lap) - petW / 2));
       const top = own ? own[1] * sz.height : fieldTop + fieldH * Math.min(1, sy + lap);
       posOf.set(a.address, { x: left + petW / 2, y: top + PET * 0.5 });
-      const ctxPct = contextOf.get(a.address)?.pct ?? null;
+      const ctx = contextOf.get(a.address);
+      const ctxPct = ctx?.pct ?? null;
+      const modelTxt = ctx ? modelOf(ctx) : "";
       const more = detail.get(a.address);
       const text = more ?? a.space_name ?? label(a);
       // The desk's branch (its own worktree, ideally) and whether another desk is about to step on it.
@@ -888,7 +1061,18 @@ export default class Agents extends View {
             .on_click((_e, cx) => { cx.stop_propagation(); this.pileClick(a, cx); })
             .children(sheets);
           return el.child(full ? pile.loop("top", { from: PET * 0.84 - n * sh - kk(4), to: PET * 0.84 - n * sh - kk(6), period: 600, easing: "ease-in-out" }) : pile);
-        });
+        })
+        .when(a.status === "done", (el) => el.child(div().id(`settle-${a.address}`).absolute().left(-kk(3)).top(-kk(13)).w(kk(13)).h(kk(13)).rounded(3)
+          .bg("#a6e3a1").flex().items_center().justify_center().cursor_pointer()
+          .tooltip("Settle: this staff clocks out until their next task")
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .on_click((_e, cx) => {
+            cx.stop_propagation();
+            this.settled.add(a.address);
+            try { localStorage.setItem("settled", JSON.stringify([...this.settled])); } catch { /* storage full: stays settled until restart */ }
+            cx.notify();
+          })
+          .child(div().text_size(kk(9)).font_bold().text_color("#17351f").child("✓"))));
       return v_flex()
         .id(`pet-${a.address}`)
         .absolute()
@@ -904,16 +1088,18 @@ export default class Agents extends View {
         })
         .on_mouse_up("left", (_e, cx) => endDrag(cx))
         .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); openFigures(a.space_name); })
-        .tooltip(`${a.program?.name ?? ""} · ${isUrge ? `idle for ${duration(waited)} · click to focus` : isSnooze ? `snoozing (${duration(waited)}) · click to focus` : a.status} · ${text}${branch ? ` · ${branch}` : ""}${clTip ? ` · ${clTip}` : ""} · drag to move`)
+        .tooltip(`${a.program?.name ?? ""} · ${isUrge ? `idle for ${duration(waited)} · click to focus` : isSnooze ? `snoozing (${duration(waited)}) · click to focus` : a.status} · ${text}${branch ? ` · ${branch}` : ""}${clTip ? ` · ${clTip}` : ""}${ctx ? ` · ${vitalsTip(ctx)}` : ""} · drag to move`)
         .child(seat)
         .child(div().mt(6).max_w(Math.max(petW + 22, cellW - 4)).px(5).h(15).flex().items_center().rounded(3)
           .bg(this.hint?.addr === a.address ? "#cba6f7" : cl ? (cl.kind === "file" ? "#ff5370" : "#f9b84a") : a.focused || (q && hitOf(a)) ? "#f9e2af" : hot ? "#f38ba8" : isUrge ? "#fab387" : isSnooze ? "#45475a" : "#0f111acc")
           .text_size(10.5).text_color(this.hint?.addr === a.address ? "#1e1233" : cl ? "#2a0f16" : a.focused || (q && hitOf(a)) ? "#2a1a14" : isUrge ? "#1e1e2e" : isSnooze ? "#cdd6f4" : "#ffffff").truncate()
           .child(this.hint?.addr === a.address ? this.hint.text : cl ? clText : `${text}${when && cellW >= 90 ? (isUrge ? ` · idle ${duration(waited)} ⏰` : isSnooze ? ` · zzz ${duration(waited)}` : ` · ${duration(waited)}`) : ""}`))
-        // The branch on the desk's nameplate, with a small git-branch glyph.
-        .when(Boolean(branch), (el) => el.child(h_flex().mt(2).gap(3).items_center().max_w(Math.max(petW + 22, cellW - 4)).text_size(9.5)
-          .child(div().relative().w(8).h(10).flex_none().children([[0, 0, 2, 2], [0, 8, 2, 2], [5, 2, 2, 2], [0, 2, 1, 6], [1, 4, 5, 1]].map(([x, y, w, h]) => div().absolute().left(x).top(y).w(w).h(h).bg("#89b4fa"))))
-          .child(div().min_w(0).truncate().font_family(monoF).text_color("#89b4fa").child(branch))));
+        .when(Boolean(branch) || Boolean(modelTxt), (el) => el.child(h_flex().mt(2).gap(3).items_center().max_w(Math.max(petW + 22, cellW - 4)).text_size(9.5)
+          .when(Boolean(branch), (el) => el
+            .child(div().relative().w(8).h(10).flex_none().children([[0, 0, 2, 2], [0, 8, 2, 2], [5, 2, 2, 2], [0, 2, 1, 6], [1, 4, 5, 1]].map(([x, y, w, h]) => div().absolute().left(x).top(y).w(w).h(h).bg("#89b4fa"))))
+            .child(div().min_w(0).truncate().font_family(monoF).text_color("#89b4fa").child(branch)))
+          .when(Boolean(modelTxt), (el) => el.child(div().min_w(0).truncate().text_color(t.dim).child(branch ? `· ${modelTxt}` : modelTxt)))))
+        .when(ctx != null && cellW >= 90, (el) => el.child(div().mt(2).max_w(Math.max(petW + 22, cellW - 4)).child(vitalsBars(t, ctx, `farm-vitals-${a.address}`, Math.max(petW + 22, cellW - 4)))));
     });
     // A dotted line of sparks between two desks that are about to clash.
     const links = [];
@@ -943,7 +1129,8 @@ export default class Agents extends View {
         if (!this.size || Math.abs(s.width - this.size.width) > 2 || Math.abs(s.height - this.size.height) > 2) { this.size = s; cx.notify(); }
       })
       .child(scene(sz.width, sz.height))
-      .when(list.length === 0, (el) => el.child(div().absolute().left(12).top(sz.height * 0.5).w(sz.width - 24).px(8).py(6).rounded(3).bg("#0f111acc").text_size(12).text_color("#ffffff").child("No staff on this floor yet. Hire one with the + above, or start an agent in this space.")))
+      .when(list.length === 0 && settledFloor === 0, (el) => el.child(div().absolute().left(12).top(sz.height * 0.5).w(sz.width - 24).px(8).py(6).rounded(3).bg("#0f111acc").text_size(12).text_color("#ffffff").child("No staff on this floor yet. Hire one with the + above, or start an agent in this space.")))
+      .when(list.length === 0 && settledFloor > 0, (el) => el.child(div().absolute().left(12).top(sz.height * 0.5).w(sz.width - 24).px(8).py(6).rounded(3).bg("#0f111acc").text_size(12).text_color("#a6e3a1").child("Everyone shipped has clocked out. Click the ✓ settled chip in the corner to bring them back.")))
       .when(hidden > 0, (el) => el.child(div().absolute().right(8).top(horizon + 6).px(8).py(3).rounded(8).bg("#11111bdd").border_1().border_color("#45475a").text_size(11).text_color("#cdd6f4").child(`+${hidden} more · narrow the panel to list all`)))
       .children(links)
       .children(this.drag?.moved ? [...pets.filter((_, i) => seated[i].address !== this.drag.addr), ...pets.filter((_, i) => seated[i].address === this.drag.addr)] : pets)
@@ -962,7 +1149,11 @@ export default class Agents extends View {
                 cx.notify();
               })))
           : box.cursor_pointer().on_click((_e, cx) => { this.notice = null; cx.notify(); }).child(this.notice));
-      });
+      })
+      .when(settledCount > 0, (el) => el.child(div().id("settled-undo").absolute().right(8).top(this.update || this.notice ? horizon + 84 : horizon + 6).px(8).py(3).rounded(8).bg("#11111bdd").border_1().border_color("#45475a").text_size(11).text_color("#a6e3a1").cursor_pointer()
+        .tooltip("Bring settled staff back on every floor")
+        .on_click((_e, cx) => { this.settled.clear(); try { localStorage.removeItem("settled"); } catch { /* storage disabled: next render retries */ } cx.notify(); })
+        .child(`✓ ${settledCount} settled`)));
 
     // Pixel UI: notched 2px frames, a hard bottom shadow, a mono caps title and a hand-drawn magnifier.
     const frame = (bc, bg) => [
@@ -991,6 +1182,11 @@ export default class Agents extends View {
               .child(h_flex().min_w(0).gap(7).items_center().child(corgi)
                 .child(div().min_w(0).truncate().font_family(mono).font_bold().text_size(10).text_color("#89b4fa").child("ENGINEERING FLOOR")))
               .child(h_flex().gap(10).items_center().flex_none()
+                .when(blockedAll.length > 0, (el) => el.child(div().id("ag-needs-you").relative().w(14).h(14).flex_none().cursor_pointer()
+                  .tooltip(`${blockedAll.length} ${blockedAll.length === 1 ? "agent needs" : "agents need"} you · open the list`)
+                  .on_click(() => this.openNeedsYou())
+                  .children([[6, 0, 2, 1], [4, 1, 6, 1], [3, 2, 8, 1], [2, 3, 10, 7], [1, 10, 12, 2], [0, 12, 14, 1], [5, 13, 4, 1], [6, 14, 2, 1]].map(([x, y, w, h]) => div().absolute().left(x).top(y).w(w).h(h).bg("#f9e2af")))
+                  .child(div().absolute().right(-5).top(-5).min_w(10).h(10).px(2).rounded(5).bg("#f38ba8").flex().items_center().justify_center().text_size(7.5).font_bold().text_color("#11111b").child(String(blockedAll.length)))))
                 .when(Boolean(this.fileError), (el) => el.child(div().id("ag-file-error").text_size(11).font_bold().text_color(t.blocked)
                   .tooltip(`${this.fileError}. Using the last good figures.`).child("!")))
                 .child(div().id("ag-hire").relative().w(14).h(14).flex_none().cursor_pointer()
@@ -1045,6 +1241,10 @@ export default class Agents extends View {
             .child(div().id("staff-clear").flex_none().px(4).text_size(14).font_family(mono).text_color(t.dim).cursor_pointer().hover((s) => s.text_color(t.foreground))
               .on_click((_e, cx) => { this.searchInput.set_value(""); this.query = ""; cx.notify(); }).child("×"))))))
       .child(collapsed ? v_flex().id("ag-list").flex_1().min_h(0).px(0).overflow_y_scrollbar().mode("always").children(rows) : farm)
+      .when(collapsed && settledCount > 0, (el) => el.child(h_flex().h(22).px(6).items_center().child(div().id("settled-undo-rail").px(6).h(17).flex().items_center().rounded(8).bg("#a6e3a122").text_size(10).text_color("#a6e3a1").cursor_pointer()
+        .tooltip("Bring settled staff back on every floor")
+        .on_click((_e, cx) => { this.settled.clear(); try { localStorage.removeItem("settled"); } catch { /* storage disabled: next render retries */ } cx.notify(); })
+        .child(`✓ ${settledCount} settled`))))
       .when(collapsed, (el) =>
         el.child(
           h_flex()
