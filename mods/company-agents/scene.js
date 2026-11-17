@@ -20,15 +20,15 @@ function ellipse(cx, cy, rx, ry, c) {
 const LIGHTS = ["#f4723a", "#f9d23c", "#8fcb4f", "#37c5d6", "#c678dd", "#f38ba8"];
 const CODE = ["#cba6f7", "#89b4fa", "#a6e3a1", "#f9e2af", "#f5c2e7", "#94e2d5"]; // keyword, function, string, class, tag, type
 function ledWall(x, w, base) {
-  const o = [], top = 8, rw = w >= 64 ? snap(Math.min(28, w * 0.34)) : snap(w), rh = snap(base - top);
+  const o = [], top = 8, rw = w >= 64 ? snap(Math.min(28, w * 0.34)) : snap(w), rh = snap(Math.min(base - top, 80)), rt = base - rh;
   // Server rack: a cabinet with a lit top cap, a darker side, a plinth with feet, and units of three kinds.
-  o.push(r(x - 2, top - 2, rw + 4, rh + 2, "#0a0c1a"), r(x, top, rw, rh, "#1a1f3d"), r(x + rw - 3, top, 3, rh, "#12152c"), r(x, top, 1, rh, "#2c3366"),
-    r(x, top, rw, 3, "#2c3366"), r(x + 3, top + 4, rw - 8, 5, "#0a0d26"), r(x + 3, top + 4, rw - 8, 1, "#3a4180"), r(x, base - 5, rw, 5, "#10132a"), r(x + 1, base - 1, 4, 1, "#3a3f66"), r(x + rw - 5, base - 1, 4, 1, "#3a3f66"));
-  for (let c = 0; c < Math.floor((rw - 12) / 2); c++) { const h = 1 + Math.floor(rnd(c * 3 + 1) * 3); o.push(r(x + 5 + c * 2, top + 8 - h, 1, h, c % 4 === 3 ? "#f9e2af" : "#a6e3a1")); }
-  o.push(r(x - 6, top - 4, rw + 12, rh + 4, "#a78bfa0b"));
+  o.push(r(x - 2, rt - 2, rw + 4, rh + 2, "#0a0c1a"), r(x, rt, rw, rh, "#1a1f3d"), r(x + rw - 3, rt, 3, rh, "#12152c"), r(x, rt, 1, rh, "#2c3366"),
+    r(x, rt, rw, 3, "#2c3366"), r(x + 3, rt + 4, rw - 8, 5, "#0a0d26"), r(x + 3, rt + 4, rw - 8, 1, "#3a4180"), r(x, base - 5, rw, 5, "#10132a"), r(x + 1, base - 1, 4, 1, "#3a3f66"), r(x + rw - 5, base - 1, 4, 1, "#3a3f66"));
+  for (let c = 0; c < Math.floor((rw - 12) / 2); c++) { const h = 1 + Math.floor(rnd(c * 3 + 1) * 3); o.push(r(x + 5 + c * 2, rt + 8 - h, 1, h, c % 4 === 3 ? "#f9e2af" : "#a6e3a1")); }
+  o.push(r(x - 6, rt - 4, rw + 12, rh + 4, "#a78bfa0b"));
   const units = Math.max(3, Math.floor((rh - 22) / 11));
   for (let k = 0; k < units; k++) {
-    const uy = top + 11 + k * 11, ux = x + 3, uw = rw - 8, kind = k % 4, ledC = LIGHTS[[2, 2, 0, 3, 2, 1][k % 6]];
+    const uy = rt + 11 + k * 11, ux = x + 3, uw = rw - 8, kind = k % 4, ledC = LIGHTS[[2, 2, 0, 3, 2, 1][k % 6]];
     o.push(r(ux, uy, uw, 9, "#252b52"), r(ux, uy, uw, 1, "#3a4180"), r(ux, uy + 8, uw, 1, "#0f1226"));
     if (kind === 0) for (let b = 0; b < Math.min(3, Math.floor((uw - 10) / 5)); b++) o.push(r(ux + 8 + b * 5, uy + 2, 4, 5, "#323a70"), r(ux + 8 + b * 5, uy + 2, 4, 1, "#4a529a"));
     else if (kind === 1) for (let v = 0; v < Math.floor((uw - 10) / 3); v++) o.push(r(ux + 8 + v * 3, uy + 2, 1, 5, "#10132a"));
