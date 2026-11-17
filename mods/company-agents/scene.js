@@ -16,44 +16,45 @@ function ellipse(cx, cy, rx, ry, c) {
   return out;
 }
 
-// A server corner on the wall: two racks full of blinking status lights, and a holographic world map floating above a projector.
+// The tech corner on the wall: a server rack with a blinking light on every unit, and a wall monitor showing a code editor.
 const LIGHTS = ["#f4723a", "#f9d23c", "#8fcb4f", "#37c5d6", "#c678dd", "#f38ba8"];
-const WORLD = [
-  "....XXXX.....XXXXXX..",
-  "...XXXXXXX..XXXXXXXXX",
-  "....XXXXXX...XXXXXXX.",
-  ".....XXXX.....XXXXX..",
-  ".......XX......XXX...",
-  ".......XXX.....XX....",
-  "........XX....X......",
-];
+const CODE = ["#c678dd", "#89b4fa", "#a6e3a1", "#f9e2af", "#f38ba8", "#8fa3c8"]; // keyword, function, string, class, tag, plain
 function ledWall(x, w, base) {
-  // Two LED code screens on the right wall, set at an angle: 4px strips that step down a little further each time.
-  const o = [], top = 12, n = Math.floor(w / U), nA = Math.max(2, Math.round(n * 0.45));
-  const ph = base - top - Math.round(n * 0.7) - 4;
-  for (let i = 0; i < n; i++) {
-    const inA = i < nA, j = inA ? i : i - nA, dy = inA ? Math.round(j * 0.25) : Math.round(j * 0.75) - 2;
-    const cx0 = x + i * U + (inA ? 0 : 2);
-    if (j === 0) o.push(r(cx0 - 3, top + dy - 3, 3, ph + 6, "#0a0c1a"));
-    o.push(r(cx0, top + dy - 3, U, ph + 6, "#0a0c1a"), r(cx0, top + dy, U, ph, "#10132a"), r(cx0, top + dy, U, 3, "#2a2f55"));
-    for (let row = 0; row < Math.floor((ph - 8) / 6); row++) {
-      const seg = i + row * 3 + (inA ? 0 : 7);
-      if (seg % 3 === 2 || rnd(row * 13 + Math.floor(seg / 3) * 5 + (inA ? 0 : 99)) < 0.22) continue;
-      const bar = r(cx0, top + dy + 6 + row * 6, U, 3, LIGHTS[Math.floor(rnd(row * 3 + Math.floor(seg / 3) * 7) * LIGHTS.length)]);
-      o.push((row + i) % 7 === 0 ? bar.loop("opacity", { from: 0.35, to: 1, period: 900 + ((row * 130 + i * 90) % 900), easing: "ease-in-out" }) : bar);
+  const o = [], top = 10;
+  const rw = w >= 64 ? snap(Math.min(36, w * 0.42)) : snap(w), rh = snap(base - top);
+  // Server rack: a dark cabinet of 10px units, each with a status light, a drive slot and vents.
+  o.push(r(x - 2, top - 2, rw + 4, rh + 2, "#0a0c1a"), r(x, top, rw, rh, "#181c36"));
+  const units = Math.max(3, Math.floor((rh - 6) / 12));
+  for (let k = 0; k < units; k++) {
+    const uy = top + 4 + k * 12;
+    o.push(r(x + 3, uy, rw - 6, 10, "#232948"), r(x + 3, uy, rw - 6, 2, "#33396b"), r(x + 3, uy + 9, rw - 6, 1, "#0f1226"));
+    const led = r(x + 6, uy + 4, 3, 3, LIGHTS[[2, 2, 0, 3][k % 4]]);
+    o.push(k % 3 === 1 ? led.loop("opacity", { from: 0.25, to: 1, period: 700 + k * 230, easing: "ease-in-out" }) : led);
+    for (let v = 0; v < Math.floor((rw - 22) / 4); v++) o.push(r(x + 14 + v * 4, uy + 3, 2, 5, "#10132a"));
+  }
+  o.push(r(x - 2, base - 2, rw + 4, 2, "#0a0c1a"));
+  if (w < 64) return o;
+  // A small desk on the baseboard with a monitor standing on it: a dark bezel, an editor window with a title bar, lines of code and a blinking cursor.
+  const mx = x + rw + 8, mw = snap(w - rw - 8), deskY = base - 14;
+  const mh = Math.max(16, Math.min(deskY - top - 16, Math.round(mw * 0.72)));
+  const my = deskY - 8 - 3 - mh; // the stand is a short neck: the screen sits low
+  const sy = my + mh + 3; // the screen's bottom edge plus the bezel
+  o.push(r(mx - 4, deskY, mw + 8, 3, "#8a5a3c"), r(mx - 4, deskY, mw + 8, 1, "#a06c48"), r(mx - 2, deskY + 3, 3, base - deskY - 3, "#6b4430"), r(mx + mw - 1, deskY + 3, 3, base - deskY - 3, "#6b4430"),
+    r(mx + mw - 8, deskY - 5, 5, 5, "#e8e2d0"), r(mx + mw - 3, deskY - 4, 2, 3, "#e8e2d0"), r(mx + mw - 7, deskY - 5, 3, 1, "#6b4430"),
+    r(mx - 3, my - 3, mw + 6, mh + 6, "#0a0c1a"), r(mx, my, mw, mh, "#12152c"), r(mx, my, mw, 5, "#232948"),
+    r(mx + 3, my + 1, 3, 3, "#f38ba8"), r(mx + 8, my + 1, 3, 3, "#f9e2af"), r(mx + 13, my + 1, 3, 3, "#a6e3a1"),
+    r(mx + Math.floor(mw / 2) - 2, sy, 4, deskY - sy - 3, "#0a0c1a"), r(mx + Math.floor(mw / 2) - 8, deskY - 3, 16, 3, "#0a0c1a"));
+  const rows = Math.floor((mh - 12) / 5), indents = [0, 1, 1, 2, 2, 1, 2, 0, 1, 2, 1, 0];
+  for (let row = 0; row < rows; row++) {
+    let cx = mx + 4 + indents[row % indents.length] * 5;
+    for (let part = 0; part < 3; part++) {
+      const pw = 5 + Math.floor(rnd(row * 7 + part * 3) * 14);
+      if (cx + pw > mx + mw - 3) break;
+      o.push(r(cx, my + 9 + row * 5, pw, 2, CODE[Math.floor(rnd(row * 11 + part * 5 + 2) * CODE.length)]));
+      cx += pw + 3;
     }
   }
-  // The projector pad stands in front of the screens, a green hologram of the world above it.
-  const hx = x + Math.floor((w - 40) / 2), hy = base - 14;
-  const beam = [];
-  for (let i = 0; i < 4; i++) beam.push(r(hx + 6 - i * 3, hy - 4 - i * 5, 28 + i * 6, 5, "#6fe0f01c"));
-  const map = [];
-  WORLD.forEach((line, yy) => [...line].forEach((ch, xx) => { if (ch === "X") map.push(r(hx - 6 + xx * 2, hy - 30 + yy * 3, 2, 3, "#7be495")); }));
-  o.push(
-    div().absolute().left(0).top(0).w(1).h(1).children(beam).loop("opacity", { from: 0.5, to: 1, period: 2400, easing: "ease-in-out" }),
-    r(hx, hy, 40, 14, "#aab4d6"), r(hx, hy, 40, 3, "#d3d8ea"), r(hx + 4, hy - 3, 32, 5, "#6fe0f0"), r(hx + 4, hy + 8, 6, 3, "#e8d44a"), r(hx + 28, hy + 8, 8, 3, "#37c5d6"),
-    div().absolute().left(0).top(0).w(1).h(1).children(map).loop("opacity", { from: 0.55, to: 1, period: 2200, easing: "ease-in-out" }),
-  );
+  o.push(r(mx + 4, my + 9 + Math.min(rows - 1, 3) * 5 + 5, 3, 3, "#cdd6f4").loop("opacity", { from: 0, to: 1, period: 900, easing: "ease-in-out" }));
   return o;
 }
 
@@ -84,7 +85,7 @@ export function scene(W, H) {
     o.push(r(x + w / 2 - 2, y, 4, h, "#0c0e1c"), r(x, y + h / 2 - 2, w, 4, "#0c0e1c"), r(x - 8, y + h + 4, w + 16, 5, "#7e86ad"));
     return o;
   };
-  // Left to right: a plant, two windows with the clock between them, the water cooler, then the LED screens and hologram.
+  // Left to right: a plant, two windows with the clock between them, the water cooler, then the server rack and wall monitor.
   const rackW = Math.max(48, Math.min(96, snap(W * 0.2))), rackX = W - rackW - 10;
   const cw = rackX - 30, x0 = 38, usable = cw - 10 - x0;
   const two = usable >= 100;
@@ -101,10 +102,10 @@ export function scene(W, H) {
   if (gap >= 44 && base - 48 >= 88) L.push(r(cx - 16, 48, 32, 32, "#2a2f4a"), r(cx - 12, 62, 24, 4, "#89b4fa"), r(cx - 2, 52, 4, 24, "#89b4fa"),
     r(cx - 8, 54, 4, 4, "#89b4fa"), r(cx + 4, 54, 4, 4, "#89b4fa"), r(cx - 8, 70, 4, 4, "#89b4fa"), r(cx + 4, 70, 4, 4, "#89b4fa"));
 
-  // The water cooler stands on the baseboard, left of the screens.
+  // The water cooler stands on the baseboard, left of the server rack.
   L.push(r(cw + 2, base - 54, 16, 22, "#6fa8d6"), r(cw + 4, base - 52, 4, 10, "#a9d0ee"), r(cw, base - 32, 20, 32, "#b7bfd6"), r(cw, base - 32, 20, 4, "#d3d8ea"), r(cw + 8, base - 24, 4, 4, "#e8744f"));
 
-  // A potted plant in the left corner and the LED wall in the right one.
+  // A potted plant in the left corner and the tech corner in the right one.
   const plant = (x) => [
     r(x, base - 44, 10, 26, "#2f6e3b"), r(x + 8, base - 54, 10, 36, "#3a8247"), r(x + 18, base - 42, 10, 24, "#2f6e3b"), r(x + 4, base - 34, 6, 6, "#52a35f"),
     r(x + 2, base - 18, 24, 18, "#8a5a3c"), r(x, base - 18, 28, 4, "#a06c48"),

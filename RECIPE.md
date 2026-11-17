@@ -56,7 +56,7 @@ a lanyard; the robot has its own chest screen and wears none.
 
 ## The office
 
-The back wall is a slate night office, left to right: a potted plant, a window with a moon, a round clock, a second window, a water cooler, and two angled LED screens full of colored code lines (some blink) with a glowing projector pad in front that floats a green hologram of the world. Below it is a dark tiled floor with window light. Every pet sits on a grey office chair with a headrest and armrests, behind a steel-grey desk with cubicle panels on both sides.
+The back wall is a slate night office, left to right: a potted plant, a window with a moon, a round clock, a second window, a water cooler, and a server rack of eight units, each with a status light (some blink) and vents, next to a small wooden desk standing on the baseboard with a monitor on it showing a code editor (title bar with three dots, colored lines of code, a blinking cursor) and a coffee mug. Below it is a dark tiled floor with window light. Every pet sits on a grey office chair with a headrest and armrests, behind a steel-grey desk with cubicle panels on both sides.
 
 Desks adapt to the team. Up to four agents get full-size desks in two staggered columns; more agents shrink every desk (never below 0.42x) and add columns and rows until all fit, with each name label as wide as its column (full text in the tooltip). Nobody is ever hidden unless the panel is too small even at the smallest size, then a badge counts the rest.
 
