@@ -3,13 +3,13 @@ import { h_flex } from "gpui-base";
 import { spaces, panes, focused, agents, theme, run, window, keys, setBadge, openOverlay, shared } from "herdr";
 
 export default class WorkspaceStatus extends View {
-  keymapHint(t) {
+  switcherHint() {
     const mac = window()?.platform === "macos";
     const mod = { cmd: mac ? "⌘" : "Ctrl+", ctrl: mac ? "⌃" : "Ctrl+", shift: mac ? "⇧" : "Shift+", alt: mac ? "⌥" : "Alt+", option: mac ? "⌥" : "Alt+" };
-    const b = keys().find((k) => k.section === "global" && k.action === "mod.open:company-keymap");
+    const b = keys().find((k) => k.section === "global" && (k.action === "mod.open:company-switcher" || k.action === "mod.open:company-keymap"));
     const parts = b && b.keys.endsWith("--") ? [...b.keys.slice(0, -2).split("-"), "-"] : b?.keys.split("-");
     const key = parts ? parts.map((p) => mod[p.toLowerCase()] ?? p.toUpperCase()).join("") : (mac ? "⌘P" : "Ctrl+P");
-    return `${key}  switcher`;
+    return `${key}  Switcher`;
   }
 
   // The palette key as actually bound, not a hardcoded one; without a
@@ -76,16 +76,29 @@ export default class WorkspaceStatus extends View {
       .child(div().flex_1())
       .child(
         h_flex()
-          .id("btn-company-keymap")
+          .id("btn-switcher")
           .cursor_pointer()
           .px(6)
           .py(2)
           .rounded(4)
           .text_color(t.dim)
           .hover((s) => s.bg(t.hover).text_color(t.foreground))
-          .tooltip("Open Floor Switcher & Keymap Settings")
-          .on_click(() => run("mod.open", { name: "company-keymap" }))
-          .child(this.keymapHint(t))
+          .tooltip("Open Floor Switcher")
+          .on_click(() => run("mod.open", { name: "company-switcher" }))
+          .child(this.switcherHint())
+      )
+      .child(
+        h_flex()
+          .id("btn-hotkeys")
+          .cursor_pointer()
+          .px(6)
+          .py(2)
+          .rounded(4)
+          .text_color(t.dim)
+          .hover((s) => s.bg(t.hover).text_color(t.foreground))
+          .tooltip("Configure Hotkeys")
+          .on_click(() => run("mod.open", { name: "company-hotkeys" }))
+          .child("Hotkeys")
       )
       .child(div().id("palette").cursor_pointer().px(6).py(2).rounded(4).text_color(t.dim).hover(s => s.bg(t.hover).text_color(t.foreground)).on_click(() => run("app.palette")).child(this.hint(t)));
   }

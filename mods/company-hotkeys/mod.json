@@ -1,0 +1,9 @@
+{
+  "place": "none",
+  "title": "Hotkeys",
+  "overlay": {
+    "kind": "dialog",
+    "width": 640,
+    "height": 520
+  }
+}
