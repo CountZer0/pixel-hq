@@ -4,6 +4,6 @@
   "overlay": {
     "kind": "dialog",
     "width": 720,
-    "height": 810
+    "height": 600
   }
 }

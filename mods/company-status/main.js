@@ -6,10 +6,11 @@ export default class WorkspaceStatus extends View {
   switcherHint() {
     const mac = window()?.platform === "macos";
     const mod = { cmd: mac ? "⌘" : "Ctrl+", ctrl: mac ? "⌃" : "Ctrl+", shift: mac ? "⇧" : "Shift+", alt: mac ? "⌥" : "Alt+", option: mac ? "⌥" : "Alt+" };
-    const b = keys().find((k) => k.section === "global" && (k.action === "mod.open:company-switcher" || k.action === "mod.open:company-keymap"));
+    const all = keys().filter((k) => k.section === "global" && (k.action === "mod.open:company-switcher" || k.action === "mod.open:company-keymap"));
+    const b = all.find((k) => k.keys === "ctrl-p" || k.keys === "cmd-p") ?? all[0];
     const parts = b && b.keys.endsWith("--") ? [...b.keys.slice(0, -2).split("-"), "-"] : b?.keys.split("-");
     const key = parts ? parts.map((p) => mod[p.toLowerCase()] ?? p.toUpperCase()).join("") : (mac ? "⌘P" : "Ctrl+P");
-    return `${key}  Switcher`;
+    return `${key} Switcher`;
   }
 
   // The palette key as actually bound, not a hardcoded one; without a
