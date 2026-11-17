@@ -43,6 +43,7 @@ function ledWall(x, w, base) {
   }
   if (w < 64) return o;
   // A little desk on the baseboard: a slim modern desk, and on it a monitor (code editor with a gutter, minimap and status bar), a keyboard, a mouse and a mug.
+  const flick = (el, from, period) => el.loop("opacity", { from, to: 1, period, easing: "linear" });
   const mx = x + rw + 6, mw = snap(w - rw - 6), deskY = base - 17;
   const mh = Math.max(24, Math.min(deskY - top - 20, Math.round(mw * 0.8)));
   const my = deskY - 11 - mh, sy = my + mh + 3;
@@ -59,20 +60,28 @@ function ledWall(x, w, base) {
     r(mx - 3, my - 3, mw + 6, mh + 6, "#0a0c1a"), r(mx + Math.floor(mw / 2) - 1, my - 2, 2, 1, "#4a5090"), r(mx - 3, my - 3, mw + 6, 1, "#3a3f66"), r(mx, my, mw, mh, "#10143a"), r(mx, my + Math.floor(mh / 2), mw, Math.ceil(mh / 2), "#0e1233"),
     r(mx + Math.floor(mw / 2) - 2, sy, 4, deskY - sy, "#0a0c1a"), r(mx + Math.floor(mw / 2) - 9, deskY - 3, 18, 3, "#0a0c1a"), r(mx + Math.floor(mw / 2) - 9, deskY - 3, 18, 1, "#3a3f66"),
     // title bar with three dots and a tab
-    r(mx, my, mw, 5, "#232a5c"), r(mx + 2, my + 1, 3, 3, "#f38ba8"), r(mx + 7, my + 1, 3, 3, "#f9e2af"), r(mx + 12, my + 1, 3, 3, "#a6e3a1"), r(mx + 18, my + 1, Math.min(14, mw - 40), 4, "#10143a"),
+    r(mx, my, mw, 5, "#232a5c"), r(mx + 2, my + 1, 3, 3, "#f38ba8"), r(mx + 7, my + 1, 3, 3, "#f9e2af"), r(mx + 12, my + 1, 3, 3, "#a6e3a1"), r(mx + 18, my + 1, Math.min(14, mw - 40), 4, "#10143a"), flick(r(mx + mw - 12, my + 1, 9, 3, "#a6e3a1"), 0.35, 1000),
     // status bar
-    r(mx, my + mh - 4, mw, 4, "#1d2250"), r(mx + 2, my + mh - 3, 8, 2, "#89b4fa"), r(mx + 12, my + mh - 3, 6, 2, "#a6e3a1"), r(mx + mw - 9, my + mh - 3, 6, 2, "#f9e2af"),
+    r(mx, my + mh - 4, mw, 4, "#1d2250"), r(mx + 2, my + mh - 3, 8, 2, "#89b4fa"), flick(r(mx + 12, my + mh - 3, 6, 2, "#a6e3a1"), 0.3, 800), r(mx + mw - 9, my + mh - 3, 6, 2, "#f9e2af"),
     // keyboard, mouse, mug with steam
     r(mx + 3, deskY - 3, Math.min(mw - 16, 26), 3, "#2a2f4f"), r(mx + 3, deskY - 3, Math.min(mw - 16, 26), 1, "#f5c2e7").loop("opacity", { from: 0.3, to: 1, period: 2600, easing: "ease-in-out" }), r(mx + 3, deskY - 3, Math.min(mw - 16, 26), 1, "#89dceb").loop("opacity", { from: 1, to: 0.3, period: 2600, easing: "ease-in-out" }), r(mx + mw - 12, deskY - 2, 4, 2, "#aab4d6"),
     r(mx + mw - 6, deskY - 5, 5, 5, "#e8e2d0"), r(mx + mw - 1, deskY - 4, 2, 3, "#e8e2d0"), r(mx + mw - 5, deskY - 5, 3, 1, "#6b4430"),
     r(mx + mw - 5, deskY - 9, 1, 3, "#cdd6f4").loop("opacity", { from: 0, to: 0.7, period: 1600, easing: "ease-in-out" }), r(mx + mw - 3, deskY - 11, 1, 3, "#cdd6f4").loop("opacity", { from: 0.6, to: 0, period: 1900, easing: "ease-in-out" }));
-  // A terminal pane under the editor: a prompt, a build progress bar (its last segment blinks) and a couple of passed checks.
-  const edH = Math.floor((mh - 15) * 0.6), tY = my + 8 + edH + 2, tH = my + mh - 5 - tY;
-  if (tH >= 9) {
-    o.push(r(mx, tY, mw, tH, "#080b22"), r(mx, tY, mw, 1, "#2a3270"), r(mx + 2, tY + 3, 2, 2, "#f38ba8"), r(mx + 6, tY + 3, 10, 2, "#a6e3a1"));
-    const seg = Math.floor((mw - 6) / 3);
-    for (let q = 0; q < seg; q++) { const on = q < seg - 2, b = r(mx + 3 + q * 3, tY + 7, 2, 2, on ? "#a6e3a1" : "#1d2250"); o.push(q === seg - 3 ? b.loop("opacity", { from: 0.3, to: 1, period: 700, easing: "linear" }) : b); }
-    if (tH >= 14) o.push(r(mx + 2, tY + 11, 2, 2, "#a6e3a1"), r(mx + 6, tY + 11, 14, 2, "#4a529a"));
+  // The monitor shows a worker processing data: code on top with the lines being run shimmering, and under it a live log (finished batches in green,
+  // the current one blinking amber, the text flickering as it streams), a progress bar with a blinking frontier and a throughput meter.
+  const edH = Math.floor((mh - 15) * 0.42), tY = my + 8 + edH + 2, tH = my + mh - 5 - tY;
+  if (tH >= 12) {
+    o.push(r(mx, tY, mw, tH, "#080b22"), r(mx, tY, mw, 1, "#2a3270"));
+    const logRows = Math.min(5, Math.floor((tH - 9) / 4));
+    for (let l = 0; l < logRows; l++) {
+      const y = tY + 3 + l * 4, cur = l === logRows - 1, wMax = Math.max(6, mw - 28), mwid = 5 + Math.floor(rnd(l * 5 + 2) * (wMax - 5));
+      o.push(cur ? flick(r(mx + 2, y, 2, 2, "#f9e2af"), 0.1, 520) : r(mx + 2, y, 2, 2, "#a6e3a1"), r(mx + 6, y, 5, 2, "#4a529a"),
+        flick(r(mx + 13, y, mwid, 2, cur ? "#e6e9f5" : "#7a84bd"), cur ? 0.25 : 0.55, cur ? 330 : 1100 + l * 370),
+        r(mx + mw - 8, y, 5, 2, cur ? "#f9e2af" : "#94e2d5"));
+    }
+    const py = tY + tH - 5, segs = Math.floor((mw - 6 - 14) / 3), lit = Math.max(1, segs - 2);
+    for (let q = 0; q < segs; q++) { const seg = r(mx + 3 + q * 3, py, 2, 2, q < lit ? "#a6e3a1" : "#1d2250"); o.push(q === lit - 1 ? flick(seg, 0.2, 600) : seg); }
+    for (let t = 0; t < 4; t++) { const h = 2 + Math.floor(rnd(t * 3 + 5) * 3); o.push(flick(r(mx + mw - 14 + t * 3, py + 2 - h, 2, h, "#89b4fa"), 0.25, 380 + t * 170)); }
   }
   const rows = Math.floor(edH / 4), indents = [0, 1, 1, 2, 2, 1, 2, 0, 1, 2, 1, 0], right = mx + mw - 9;
   for (let row = 0; row < rows; row++) {
@@ -88,6 +97,7 @@ function ledWall(x, w, base) {
       cx += pw + 2;
     }
   }
+  for (const [rr, per] of [[1, 1100], [3, 1500]]) if (rr < rows) o.push(flick(r(mx + 5, my + 7 + rr * 4, mw - 10, 4, "#a6e3a122"), 0.15, per));
   for (let m = 0; m < Math.floor(edH / 3); m++) o.push(r(mx + mw - 6, my + 8 + m * 3, 2 + Math.floor(rnd(m * 4 + 1) * 3), 1, "#4a529a"));
   o.push(r(mx + 7 + 4, my + 8 + Math.min(rows - 1, 3) * 4, 2, 2, "#cdd6f4").loop("opacity", { from: 0, to: 1, period: 900, easing: "ease-in-out" }));
   return o;
