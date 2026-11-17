@@ -16,45 +16,65 @@ function ellipse(cx, cy, rx, ry, c) {
   return out;
 }
 
-// The tech corner on the wall: a server rack with a blinking light on every unit, and a wall monitor showing a code editor.
+// The tech corner on the wall: a server rack (drive bays, vents and fans, a glowing light on every unit) and a modern little desk with a monitor, keyboard and a mug.
 const LIGHTS = ["#f4723a", "#f9d23c", "#8fcb4f", "#37c5d6", "#c678dd", "#f38ba8"];
-const CODE = ["#c678dd", "#89b4fa", "#a6e3a1", "#f9e2af", "#f38ba8", "#8fa3c8"]; // keyword, function, string, class, tag, plain
+const CODE = ["#cba6f7", "#89b4fa", "#a6e3a1", "#f9e2af", "#f5c2e7", "#94e2d5"]; // keyword, function, string, class, tag, type
 function ledWall(x, w, base) {
-  const o = [], top = 10;
-  const rw = w >= 64 ? snap(Math.min(36, w * 0.42)) : snap(w), rh = snap(base - top);
-  // Server rack: a dark cabinet of 10px units, each with a status light, a drive slot and vents.
-  o.push(r(x - 2, top - 2, rw + 4, rh + 2, "#0a0c1a"), r(x, top, rw, rh, "#181c36"));
-  const units = Math.max(3, Math.floor((rh - 6) / 12));
+  const o = [], top = 8, rw = w >= 64 ? snap(Math.min(28, w * 0.34)) : snap(w), rh = snap(base - top);
+  // Server rack: a cabinet with a lit top cap, a darker side, a plinth with feet, and units of three kinds.
+  o.push(r(x - 2, top - 2, rw + 4, rh + 2, "#0a0c1a"), r(x, top, rw, rh, "#1a1f3d"), r(x + rw - 3, top, 3, rh, "#12152c"), r(x, top, 1, rh, "#2c3366"),
+    r(x, top, rw, 3, "#2c3366"), r(x + 3, top + 4, rw - 8, 2, "#c7cde4"), r(x, base - 5, rw, 5, "#10132a"), r(x + 1, base - 1, 4, 1, "#3a3f66"), r(x + rw - 5, base - 1, 4, 1, "#3a3f66"));
+  const units = Math.max(3, Math.floor((rh - 20) / 11));
   for (let k = 0; k < units; k++) {
-    const uy = top + 4 + k * 12;
-    o.push(r(x + 3, uy, rw - 6, 10, "#232948"), r(x + 3, uy, rw - 6, 2, "#33396b"), r(x + 3, uy + 9, rw - 6, 1, "#0f1226"));
-    const led = r(x + 6, uy + 4, 3, 3, LIGHTS[[2, 2, 0, 3][k % 4]]);
+    const uy = top + 9 + k * 11, ux = x + 3, uw = rw - 8, kind = k % 3, ledC = LIGHTS[[2, 2, 0, 3, 2, 1][k % 6]];
+    o.push(r(ux, uy, uw, 9, "#252b52"), r(ux, uy, uw, 1, "#3a4180"), r(ux, uy + 8, uw, 1, "#0f1226"));
+    if (kind === 0) for (let b = 0; b < Math.min(3, Math.floor((uw - 10) / 5)); b++) o.push(r(ux + 8 + b * 5, uy + 2, 4, 5, "#323a70"), r(ux + 8 + b * 5, uy + 2, 4, 1, "#4a529a"));
+    else if (kind === 1) for (let v = 0; v < Math.floor((uw - 10) / 3); v++) o.push(r(ux + 8 + v * 3, uy + 2, 1, 5, "#10132a"));
+    else for (let f = 0; f < (uw >= 28 ? 2 : 1); f++) o.push(r(ux + 8 + f * 8, uy + 2, 5, 5, "#10132a"), r(ux + 9 + f * 8, uy + 3, 3, 3, "#323a70"));
+    o.push(r(ux + 1, uy + 2, 5, 5, ledC + "33"));
+    const led = r(ux + 2, uy + 3, 3, 3, ledC);
     o.push(k % 3 === 1 ? led.loop("opacity", { from: 0.25, to: 1, period: 700 + k * 230, easing: "ease-in-out" }) : led);
-    for (let v = 0; v < Math.floor((rw - 22) / 4); v++) o.push(r(x + 14 + v * 4, uy + 3, 2, 5, "#10132a"));
   }
-  o.push(r(x - 2, base - 2, rw + 4, 2, "#0a0c1a"));
   if (w < 64) return o;
-  // A small desk on the baseboard with a monitor standing on it: a dark bezel, an editor window with a title bar, lines of code and a blinking cursor.
-  const mx = x + rw + 8, mw = snap(w - rw - 8), deskY = base - 14;
-  const mh = Math.max(16, Math.min(deskY - top - 16, Math.round(mw * 0.72)));
-  const my = deskY - 8 - 3 - mh; // the stand is a short neck: the screen sits low
-  const sy = my + mh + 3; // the screen's bottom edge plus the bezel
-  o.push(r(mx - 4, deskY, mw + 8, 3, "#8a5a3c"), r(mx - 4, deskY, mw + 8, 1, "#a06c48"), r(mx - 2, deskY + 3, 3, base - deskY - 3, "#6b4430"), r(mx + mw - 1, deskY + 3, 3, base - deskY - 3, "#6b4430"),
-    r(mx + mw - 8, deskY - 5, 5, 5, "#e8e2d0"), r(mx + mw - 3, deskY - 4, 2, 3, "#e8e2d0"), r(mx + mw - 7, deskY - 5, 3, 1, "#6b4430"),
-    r(mx - 3, my - 3, mw + 6, mh + 6, "#0a0c1a"), r(mx, my, mw, mh, "#12152c"), r(mx, my, mw, 5, "#232948"),
-    r(mx + 3, my + 1, 3, 3, "#f38ba8"), r(mx + 8, my + 1, 3, 3, "#f9e2af"), r(mx + 13, my + 1, 3, 3, "#a6e3a1"),
-    r(mx + Math.floor(mw / 2) - 2, sy, 4, deskY - sy - 3, "#0a0c1a"), r(mx + Math.floor(mw / 2) - 8, deskY - 3, 16, 3, "#0a0c1a"));
-  const rows = Math.floor((mh - 12) / 5), indents = [0, 1, 1, 2, 2, 1, 2, 0, 1, 2, 1, 0];
+  // A little desk on the baseboard: a slim modern desk, and on it a monitor (code editor with a gutter, minimap and status bar), a keyboard, a mouse and a mug.
+  const mx = x + rw + 6, mw = snap(w - rw - 6), deskY = base - 17;
+  const mh = Math.max(24, Math.min(deskY - top - 20, Math.round(mw * 0.8)));
+  const my = deskY - 11 - mh, sy = my + mh + 3;
+  o.push(r(mx - 4, my - 6, mw + 8, mh + 12, "#89b4fa0c"), // the screen's glow on the wall
+    r(mx - 6, base, mw + 12, 2, "#0a0c1a66"),
+    // a modern desk: a slim light top, thin dark legs with feet, a cable tray, a hanging white drawer and a glowing LED strip underneath
+    r(mx - 5, deskY, mw + 10, 3, "#dfe3f2"), r(mx - 5, deskY, mw + 10, 1, "#f4f6fc"), r(mx - 5, deskY + 3, mw + 10, 1, "#9aa1c2"),
+    r(mx - 5, base - 3, mw + 10, 3, "#6fe0f01a"), r(mx - 2, deskY + 4, 2, base - deskY - 4, "#2a2e4a"), r(mx + mw, deskY + 4, 2, base - deskY - 4, "#2a2e4a"),
+    r(mx - 4, base - 1, 6, 1, "#2a2e4a"), r(mx + mw - 2, base - 1, 6, 1, "#2a2e4a"), r(mx + 1, deskY + 5, mw - 2, 2, "#1c2038"),
+    r(mx + mw - 16, deskY + 7, 14, 8, "#c9cee4"), r(mx + mw - 16, deskY + 7, 14, 1, "#e6e9f5"), r(mx + mw - 13, deskY + 10, 8, 1, "#7e86ad"), r(mx + mw - 13, deskY + 13, 8, 1, "#7e86ad"),
+    r(mx - 2, deskY + 4, mw + 4, 1, "#6fe0f0").loop("opacity", { from: 0.55, to: 1, period: 2400, easing: "ease-in-out" }),
+    // the monitor: bezel with a light top edge, a neck and a foot
+    r(mx - 3, my - 3, mw + 6, mh + 6, "#0a0c1a"), r(mx - 3, my - 3, mw + 6, 1, "#3a3f66"), r(mx, my, mw, mh, "#10143a"), r(mx, my + Math.floor(mh / 2), mw, Math.ceil(mh / 2), "#0e1233"),
+    r(mx + Math.floor(mw / 2) - 2, sy, 4, deskY - sy, "#0a0c1a"), r(mx + Math.floor(mw / 2) - 9, deskY - 3, 18, 3, "#0a0c1a"), r(mx + Math.floor(mw / 2) - 9, deskY - 3, 18, 1, "#3a3f66"),
+    // title bar with three dots and a tab
+    r(mx, my, mw, 5, "#232a5c"), r(mx + 2, my + 1, 3, 3, "#f38ba8"), r(mx + 7, my + 1, 3, 3, "#f9e2af"), r(mx + 12, my + 1, 3, 3, "#a6e3a1"), r(mx + 18, my + 1, Math.min(14, mw - 40), 4, "#10143a"),
+    // status bar
+    r(mx, my + mh - 4, mw, 4, "#1d2250"), r(mx + 2, my + mh - 3, 8, 2, "#89b4fa"), r(mx + 12, my + mh - 3, 6, 2, "#a6e3a1"), r(mx + mw - 9, my + mh - 3, 6, 2, "#f9e2af"),
+    // keyboard, mouse, mug with steam
+    r(mx + 3, deskY - 3, Math.min(mw - 16, 26), 3, "#2a2f4f"), r(mx + 3, deskY - 3, Math.min(mw - 16, 26), 1, "#4a5090"), r(mx + mw - 12, deskY - 2, 4, 2, "#aab4d6"),
+    r(mx + mw - 6, deskY - 5, 5, 5, "#e8e2d0"), r(mx + mw - 1, deskY - 4, 2, 3, "#e8e2d0"), r(mx + mw - 5, deskY - 5, 3, 1, "#6b4430"),
+    r(mx + mw - 5, deskY - 9, 1, 3, "#cdd6f4").loop("opacity", { from: 0, to: 0.7, period: 1600, easing: "ease-in-out" }), r(mx + mw - 3, deskY - 11, 1, 3, "#cdd6f4").loop("opacity", { from: 0.6, to: 0, period: 1900, easing: "ease-in-out" }));
+  const rows = Math.floor((mh - 15) / 4), indents = [0, 1, 1, 2, 2, 1, 2, 0, 1, 2, 1, 0], right = mx + mw - 9;
   for (let row = 0; row < rows; row++) {
-    let cx = mx + 4 + indents[row % indents.length] * 5;
+    const ry = my + 8 + row * 4;
+    o.push(r(mx + 2, ry, 2, 2, "#3a3f66"));
+    if (row === 2) o.push(r(mx + 5, ry - 1, mw - 10, 4, "#ffffff0b"));
+    if (row % 5 === 4) continue;
+    let cx = mx + 7 + indents[row % indents.length] * 4;
     for (let part = 0; part < 3; part++) {
-      const pw = 5 + Math.floor(rnd(row * 7 + part * 3) * 14);
-      if (cx + pw > mx + mw - 3) break;
-      o.push(r(cx, my + 9 + row * 5, pw, 2, CODE[Math.floor(rnd(row * 11 + part * 5 + 2) * CODE.length)]));
-      cx += pw + 3;
+      const pw = 4 + Math.floor(rnd(row * 7 + part * 3) * 11);
+      if (cx + pw > right) break;
+      o.push(r(cx, ry, pw, 2, CODE[Math.floor(rnd(row * 11 + part * 5 + 2) * CODE.length)]));
+      cx += pw + 2;
     }
   }
-  o.push(r(mx + 4, my + 9 + Math.min(rows - 1, 3) * 5 + 5, 3, 3, "#cdd6f4").loop("opacity", { from: 0, to: 1, period: 900, easing: "ease-in-out" }));
+  for (let m = 0; m < Math.floor((mh - 15) / 3); m++) o.push(r(mx + mw - 6, my + 8 + m * 3, 2 + Math.floor(rnd(m * 4 + 1) * 3), 1, "#4a529a"));
+  o.push(r(mx + 7 + 4, my + 8 + Math.min(rows - 1, 3) * 4, 2, 2, "#cdd6f4").loop("opacity", { from: 0, to: 1, period: 900, easing: "ease-in-out" }));
   return o;
 }
 
@@ -86,7 +106,7 @@ export function scene(W, H) {
     return o;
   };
   // Left to right: a plant, two windows with the clock between them, the water cooler, then the server rack and wall monitor.
-  const rackW = Math.max(48, Math.min(96, snap(W * 0.2))), rackX = W - rackW - 10;
+  const rackW = Math.max(64, Math.min(110, snap(W * 0.27))), rackX = W - rackW - 10;
   const cw = rackX - 30, x0 = 38, usable = cw - 10 - x0;
   const two = usable >= 100;
   const gap = two ? Math.max(32, snap(usable * 0.26)) : 0;
