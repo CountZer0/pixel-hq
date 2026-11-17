@@ -215,6 +215,14 @@ export default class Agents extends View {
     // status plugin (this mod's opencode-status.js) into OpenCode's plugins folder. Only ever replaces Pixel HQ's own older copy;
     // deleting the file removes it for good.
     this.notice = null;
+    this.pendingSetupClaude = false;
+    this.pendingSetupAntigravity = false;
+    this.pendingSetupOpenCode = false;
+    this.pendingSetupCodex = false;
+    this.lastSetupClaudeAttempt = 0;
+    this.lastSetupAntigravityAttempt = 0;
+    this.lastSetupOpenCodeAttempt = 0;
+    this.lastSetupCodexAttempt = 0;
     this.setupOpenCode(cx);
     // The OpenCode HP plugin (directory package) is auto-discovered by every TUI from the global plugins folder:
     // it labels the terminal with the context fill for the desk's HP bar. Same discipline as the status plugin.
@@ -222,6 +230,7 @@ export default class Agents extends View {
     // Ensure Claude Code and Antigravity statusLine are configured to report context, model, and quota.
     this.setupClaude(cx);
     this.setupAntigravity(cx);
+    this.setupCodex(cx);
     // Tell the person when a newer Pixel HQ is out: read the tiny version.json from GitHub at start and every 6 hours.
     // Nothing is sent. Deleting this mod's own version.json turns the check off.
     this.update = null;
@@ -239,6 +248,19 @@ export default class Agents extends View {
       if (this.nudged.size) {
         for (const [addr, until] of this.nudged) if (now > until) this.nudged.delete(addr);
         cx.notify();
+      }
+      if (this.pendingSetupClaude && now - this.lastSetupClaudeAttempt > 4000 && !this.isBusy(/claude/)) {
+        this.setupClaude(cx);
+      }
+      if (this.pendingSetupAntigravity && now - this.lastSetupAntigravityAttempt > 4000 && !this.isBusy(/antigravity|agy/)) {
+        this.setupAntigravity(cx);
+      }
+      if (this.pendingSetupOpenCode && now - this.lastSetupOpenCodeAttempt > 4000 && !this.isBusy(/opencode/)) {
+        this.setupOpenCode(cx);
+        this.setupOpenCodeHp(cx);
+      }
+      if (this.pendingSetupCodex && now - this.lastSetupCodexAttempt > 4000 && !this.isBusy(/codex/)) {
+        this.setupCodex(cx);
       }
       if (this.out) {
         if (now >= this.out.until) { this.out = null; this.nextAt = now + 14000 + Math.random() * 18000; cx.notify(); }
@@ -425,6 +447,19 @@ export default class Agents extends View {
     run("terminal.peek", { terminal: addr });
   }
 
+  isBusy(pattern) {
+    try {
+      const list = agents();
+      if (!Array.isArray(list)) return false;
+      return list.some((a) => {
+        const name = String(a.program?.key ?? a.report?.app ?? a.status?.app ?? a.app ?? a.name ?? "").toLowerCase();
+        return pattern.test(name) && (a.status === "working" || a.status === "typing");
+      });
+    } catch {
+      return false;
+    }
+  }
+
   // Live sub-agents of `addr`, depth first, each with the tree lines in front of it.
   tree(all, addr, lead = []) {
     const kids = all.filter((k) => k.parent === addr && k.state === "live");
@@ -510,10 +545,10 @@ export default class Agents extends View {
           const pid = info?.foreground?.pid;
           const cwd = paneBy.get(a.pane)?.cwd;
           if (!pid && !cwd) continue;
-          const script = `${appHome()}/mods/company-agents/codex-vitals.py`;
+          const script = machine ? `${machine ? "~/.codex/pixel-hq-vitals.py" : ""}` : `${appHome()}/mods/company-agents/codex-vitals.py`;
           const candidates = window()?.platform === "windows" && !machine ? ["python", "python3", "py"] : ["python3", "python"];
           for (const bin of candidates) {
-            const r = await exec(bin, [script, String(pid ?? ""), cwd ?? ""], { timeout: 8000, on: machine }).catch(() => null);
+            const r = await exec(bin, [script || `${appHome()}/mods/company-agents/codex-vitals.py`, String(pid ?? ""), cwd ?? ""], { timeout: 8000, on: machine }).catch(() => null);
             if (!r) continue;
             const ev = r.code === 0 && r.stdout ? JSON.parse(r.stdout.trim().split("\n").pop()) : null;
             if (ev && (ev.pct != null || ev.model || ev.quota != null)) {
@@ -669,6 +704,11 @@ export default class Agents extends View {
   }
 
   async setupOpenCode(cx) {
+    this.lastSetupOpenCodeAttempt = Date.now();
+    if (this.isBusy(/opencode/)) {
+      this.pendingSetupOpenCode = true;
+      return;
+    }
     const src = `${appHome()}/mods/company-agents/opencode-status.js`;
     const had = localStorage.getItem("oc-plugin") ? "1" : "0";
     // Exit codes: 0 added, 3 no OpenCode folder, 4 nothing to do, 5 updated to this mod's newer version of its own plugin.
@@ -686,13 +726,21 @@ export default class Agents extends View {
     const r = await (window()?.platform === "windows"
       ? exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", `& { ${ps} } '${src.replace(/'/g, "''")}' '${had}'`])
       : exec("sh", ["-c", sh, "sh", src, had])).catch(() => null);
-    if (!r || ![0, 4, 5].includes(r.code)) return; // no OpenCode here (yet), or a failed copy: try again next launch
+    if (!r || ![0, 4, 5].includes(r.code)) {
+      if (r && r.code !== 3) this.pendingSetupOpenCode = true;
+      return;
+    }
+    this.pendingSetupOpenCode = false;
     localStorage.setItem("oc-plugin", "1");
     if (r.code === 0) { this.notice = "OpenCode plugin added · restart OpenCode to see it here"; cx.notify(); }
     if (r.code === 5) { this.notice = "OpenCode plugin updated · restart OpenCode to apply"; cx.notify(); }
   }
 
   async setupOpenCodeHp(cx) {
+    if (this.isBusy(/opencode/)) {
+      this.pendingSetupOpenCode = true;
+      return;
+    }
     const src = `${appHome()}/mods/company-agents/opencode-hp`;
     const had = localStorage.getItem("oc-hp-plugin") ? "1" : "0";
     // Exit codes mirror setupOpenCode: 0 added, 3 no OpenCode folder, 4 nothing to do, 5 updated to a newer version of this plugin.
@@ -709,13 +757,21 @@ export default class Agents extends View {
     const r = await (window()?.platform === "windows"
       ? exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", `& { ${ps} } '${src.replace(/'/g, "''")}' '${had}'`])
       : exec("sh", ["-c", sh, "sh", src, had])).catch(() => null);
-    if (!r || ![0, 4, 5].includes(r.code)) return;
+    if (!r || ![0, 4, 5].includes(r.code)) {
+      if (r && r.code !== 3) this.pendingSetupOpenCode = true;
+      return;
+    }
     localStorage.setItem("oc-hp-plugin", "1");
     if (r.code === 0) { this.notice = "OpenCode HP plugin added"; cx.notify(); }
     if (r.code === 5) { this.notice = "OpenCode HP plugin updated"; cx.notify(); }
   }
 
   async setupClaude(cx) {
+    this.lastSetupClaudeAttempt = Date.now();
+    if (this.isBusy(/claude/)) {
+      this.pendingSetupClaude = true;
+      return;
+    }
     const src = `${appHome()}/mods/company-agents/claude-statusline.sh`;
     const sh = 'SRC="$1"; D="$HOME/.claude"; [ -d "$D" ] || exit 3; T="$D/pixel-hq-statusline.sh"; '
       + 'cp "$SRC" "$T" && chmod +x "$T" || exit 1; '
@@ -768,17 +824,27 @@ export default class Agents extends View {
       + "  } "
       + "}";
     const machines = [undefined, ...new Set(spaces().map((s) => s.machine).filter(Boolean))];
+    let ok = true;
     for (const on of machines) {
       const isWin = !on && window()?.platform === "windows";
+      let r;
       if (isWin) {
-        await exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", `& { ${ps} } '${src.replace(/'/g, "''")}'`]).catch(() => null);
+        r = await exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", `& { ${ps} } '${src.replace(/'/g, "''")}'`]).catch(() => null);
       } else {
-        await exec("sh", ["-c", sh, "sh", src], { on, timeout: 8000 }).catch(() => null);
+        r = await exec("sh", ["-c", sh, "sh", src], { on, timeout: 8000 }).catch(() => null);
       }
+      if (r && r.code !== 0 && r.code !== 3) ok = false;
+      else if (!r) ok = false;
     }
+    this.pendingSetupClaude = !ok;
   }
 
   async setupAntigravity(cx) {
+    this.lastSetupAntigravityAttempt = Date.now();
+    if (this.isBusy(/antigravity|agy/)) {
+      this.pendingSetupAntigravity = true;
+      return;
+    }
     const src = `${appHome()}/mods/company-agents/claude-statusline.sh`;
     const sh = 'SRC="$1"; D="$HOME/.gemini/antigravity-cli"; [ -d "$D" ] || exit 3; T="$D/pixel-hq-statusline.sh"; '
       + 'cp "$SRC" "$T" && chmod +x "$T" || exit 1; '
@@ -833,14 +899,46 @@ export default class Agents extends View {
       + "  } "
       + "}";
     const machines = [undefined, ...new Set(spaces().map((s) => s.machine).filter(Boolean))];
+    let ok = true;
     for (const on of machines) {
       const isWin = !on && window()?.platform === "windows";
+      let r;
       if (isWin) {
-        await exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", `& { ${ps} } '${src.replace(/'/g, "''")}'`]).catch(() => null);
+        r = await exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", `& { ${ps} } '${src.replace(/'/g, "''")}'`]).catch(() => null);
       } else {
-        await exec("sh", ["-c", sh, "sh", src], { on, timeout: 8000 }).catch(() => null);
+        r = await exec("sh", ["-c", sh, "sh", src], { on, timeout: 8000 }).catch(() => null);
       }
+      if (r && r.code !== 0 && r.code !== 3) ok = false;
+      else if (!r) ok = false;
     }
+    this.pendingSetupAntigravity = !ok;
+  }
+
+  async setupCodex(cx) {
+    this.lastSetupCodexAttempt = Date.now();
+    if (this.isBusy(/codex/)) {
+      this.pendingSetupCodex = true;
+      return;
+    }
+    const src = `${appHome()}/mods/company-agents/codex-vitals.py`;
+    const sh = 'SRC="$1"; D="$HOME/.codex"; [ -d "$D" ] || exit 3; T="$D/pixel-hq-vitals.py"; '
+      + 'cp "$SRC" "$T" && chmod +x "$T" || exit 1; exit 0';
+    const ps = "param($src); $d = Join-Path $env:USERPROFILE '.codex'; if (-not (Test-Path -LiteralPath $d)) { exit 3 }; "
+      + "$t = Join-Path $d 'pixel-hq-vitals.py'; Copy-Item -LiteralPath $src -Destination $t -Force -ErrorAction Stop";
+    const machines = [undefined, ...new Set(spaces().map((s) => s.machine).filter(Boolean))];
+    let ok = true;
+    for (const on of machines) {
+      const isWin = !on && window()?.platform === "windows";
+      let r;
+      if (isWin) {
+        r = await exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", `& { ${ps} } '${src.replace(/'/g, "''")}'`]).catch(() => null);
+      } else {
+        r = await exec("sh", ["-c", sh, "sh", src], { on, timeout: 8000 }).catch(() => null);
+      }
+      if (r && r.code !== 0 && r.code !== 3) ok = false;
+      else if (!r) ok = false;
+    }
+    this.pendingSetupCodex = !ok;
   }
 
   render(cx) {

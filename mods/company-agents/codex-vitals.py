@@ -14,6 +14,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 def find_session_file(pid_str, cwd, home):
     sessions_dir = os.path.join(home, "sessions")
@@ -60,25 +61,29 @@ def extract_vitals(fpath, home):
     token_ev = None
 
     if fpath and os.path.isfile(fpath):
-        try:
-            with open(fpath, "r", encoding="utf-8") as f:
-                for line in f:
-                    if not model and '"model":' in line:
-                        try:
-                            d = json.loads(line)
-                            p = d.get("payload") or {}
-                            m = p.get("model") or (p.get("thread_settings") or {}).get("model")
-                            if m and isinstance(m, str):
-                                model = m
-                        except Exception:
-                            pass
-                    if '"type":"token_count"' in line:
-                        try:
-                            token_ev = json.loads(line)
-                        except Exception:
-                            pass
-        except Exception:
-            pass
+        for attempt in range(3):
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if not model and '"model":' in line:
+                            try:
+                                d = json.loads(line)
+                                p = d.get("payload") or {}
+                                m = p.get("model") or (p.get("thread_settings") or {}).get("model")
+                                if m and isinstance(m, str):
+                                    model = m
+                            except Exception:
+                                pass
+                        if '"type":"token_count"' in line:
+                            try:
+                                token_ev = json.loads(line)
+                            except Exception:
+                                pass
+                if token_ev and model:
+                    break
+            except Exception:
+                pass
+            time.sleep(0.05)
 
     # Fallback model from config.toml if not found in rollout
     if not model:
