@@ -1,9 +1,9 @@
 // Pixel HQ Floor Switcher
-// Instant switching between workspace floors with quick search, arrow navigation, and 1-9 shortcuts.
+// Instant switching between workspace floors with quick search, arrow navigation, 1-9 shortcuts, and Ctrl+P cycling.
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { spaces, agents, run, theme, props, closeOverlay } from "herdr";
+import { spaces, agents, run, theme, props, closeOverlay, nextCommand } from "herdr";
 
 const MONO = "JetBrains Mono, Menlo, monospace";
 
@@ -11,6 +11,7 @@ export default class CompanySwitcher extends View {
   init(_props, cx) {
     this.filter = "";
     this.selected = 0;
+    this.cycling = false;
 
     this.input = InputState.new({ placeholder: "Search floor or type 1–9 to jump…" });
     this.input.on("change", (_e, cx) => {
@@ -24,6 +25,24 @@ export default class CompanySwitcher extends View {
     this.handle.focus();
     this.input.focus();
     cx.timer.after(200, () => this.input.focus());
+
+    // Listen to nextCommand for cycling commands when Ctrl+P is pressed repeatedly
+    cx.spawn(async (cx) => {
+      for (;;) {
+        const c = await nextCommand();
+        const list = this.filteredSpaces();
+        if (list.length === 0) continue;
+        if (c === "cycle") {
+          this.selected = (this.selected + 1) % list.length;
+          this.cycling = true;
+          cx.notify();
+        } else if (c === "cycleBack") {
+          this.selected = (this.selected - 1 + list.length) % list.length;
+          this.cycling = true;
+          cx.notify();
+        }
+      }
+    });
   }
 
   filteredSpaces() {
@@ -60,11 +79,36 @@ export default class CompanySwitcher extends View {
     return v_flex()
       .id("company-switcher")
       .track_focus(this.handle)
+      .on_modifiers_changed((e, cx) => {
+        const ctrlHeld = Boolean(e.modifiers?.control || e.modifiers?.platform);
+        if (!ctrlHeld && this.cycling) {
+          this.cycling = false;
+          this.switchCurrent(cx);
+        }
+      })
       .on_key_down((e, cx) => {
         if (e.key === "escape") {
+          this.cycling = false;
           closeOverlay(props()?.overlay);
           cx.stop_propagation();
           return;
+        }
+
+        const isCtrlOrCmd = Boolean(e.modifiers?.control || e.modifiers?.platform);
+        const isP = e.key === "p" || e.key === "P" || e.keystroke?.endsWith("-p");
+
+        if (isCtrlOrCmd && isP) {
+          if (list.length > 0) {
+            if (e.modifiers?.shift) {
+              this.selected = (this.selected - 1 + list.length) % list.length;
+            } else {
+              this.selected = (this.selected + 1) % list.length;
+            }
+            this.cycling = true;
+            cx.stop_propagation();
+            cx.notify();
+            return;
+          }
         }
 
         if (e.key === "down" || e.key === "arrow_down" || (e.key === "tab" && !e.modifiers?.shift)) {
@@ -82,6 +126,7 @@ export default class CompanySwitcher extends View {
         }
 
         if (e.key === "enter") {
+          this.cycling = false;
           this.switchCurrent(cx);
           cx.stop_propagation();
           return;
@@ -91,11 +136,20 @@ export default class CompanySwitcher extends View {
           const idx = parseInt(e.key, 10) - 1;
           const all = spaces() ?? [];
           if (all[idx]) {
+            this.cycling = false;
             run("space.select", { id: all[idx].id });
             closeOverlay(props()?.overlay);
             cx.stop_propagation();
             return;
           }
+        }
+      })
+      .on_key_up((e, cx) => {
+        const k = (e.key ?? "").toLowerCase();
+        if ((k === "control" || k === "ctrl" || k === "meta" || k === "command") && this.cycling) {
+          this.cycling = false;
+          this.switchCurrent(cx);
+          cx.stop_propagation();
         }
       })
       .size_full()
@@ -135,7 +189,7 @@ export default class CompanySwitcher extends View {
           )
           .child(
             div()
-              .id("btn-esc")
+              .id("btn-esc-switcher")
               .px(8)
               .py(3)
               .rounded(5)
@@ -292,7 +346,7 @@ export default class CompanySwitcher extends View {
           .justify_between()
           .text_size(11)
           .text_color("#6c7086")
-          .child("↑/↓ or Tab navigate · Enter switch · 1–9 quick jump")
+          .child("Hold Ctrl + press P to cycle & release to switch · 1–9 quick jump")
           .child("Esc close"),
       );
   }

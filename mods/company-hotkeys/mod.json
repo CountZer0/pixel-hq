@@ -3,7 +3,7 @@
   "title": "Hotkeys",
   "overlay": {
     "kind": "dialog",
-    "width": 640,
-    "height": 520
+    "width": 720,
+    "height": 810
   }
 }

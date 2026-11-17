@@ -16,6 +16,10 @@ const PRESETS = {
       "alt-[": "space.prev",
       "alt-]": "space.next",
     },
+    switcherKeys: {
+      "ctrl-p": "company-switcher.cycle",
+      "ctrl-shift-p": "company-switcher.cycleBack",
+    },
   },
   tmux: {
     name: "Tmux Style",
@@ -25,26 +29,34 @@ const PRESETS = {
       "alt-n": "space.next",
       "alt-p": "space.prev",
     },
+    switcherKeys: {
+      "ctrl-b": "company-switcher.cycle",
+    },
   },
   defaults: {
     name: "Herdr Defaults (Reset)",
-    desc: "Reset to default Herdr bindings: Ctrl+Shift+P for palette, Ctrl+Shift+PageDown/Up for spaces",
+    desc: "Reset to Herdr defaults: Ctrl+Shift+P for palette, Ctrl+Shift+PageDown/Up for spaces",
     keys: {
       "ctrl-p": "app.palette",
       "ctrl-shift-p": "app.palette",
       "ctrl-shift-pagedown": "space.next",
       "ctrl-shift-pageup": "space.prev",
     },
+    switcherKeys: null,
   },
 };
 
 const ACTION_OPTIONS = [
-  { id: "mod.open:company-switcher", label: "Floor Switcher", desc: "Open the floor switcher modal" },
-  { id: "space.next", label: "Next Space", desc: "Jump to next workspace floor" },
-  { id: "space.prev", label: "Prev Space", desc: "Jump to previous workspace floor" },
-  { id: "space.new", label: "New Space", desc: "Create new workspace floor" },
-  { id: "app.palette", label: "Command Palette", desc: "Open Herdr command palette" },
+  { id: "mod.open:company-switcher", key: "switcher", label: "Floor Switcher", desc: "Open the floor switcher modal" },
+  { id: "space.next", key: "next", label: "Next Space", desc: "Jump to next workspace floor" },
+  { id: "space.prev", key: "prev", label: "Prev Space", desc: "Jump to previous workspace floor" },
+  { id: "space.new", key: "new", label: "New Space", desc: "Create new workspace floor" },
+  { id: "app.palette", key: "palette", label: "Command Palette", desc: "Open Herdr command palette" },
 ];
+
+function sanitizeId(str) {
+  return String(str).replace(/[^a-zA-Z0-9_-]/g, "-");
+}
 
 export default class CompanyHotkeys extends View {
   init(_props, cx) {
@@ -60,6 +72,15 @@ export default class CompanyHotkeys extends View {
     cx.timer.after(200, () => this.customKeyInput.focus());
   }
 
+  closeModal() {
+    const ov = props()?.overlay;
+    if (ov) {
+      closeOverlay(ov);
+    } else {
+      run("overlay.close");
+    }
+  }
+
   normalizeKey(input) {
     if (!input) return "";
     return input
@@ -69,7 +90,7 @@ export default class CompanyHotkeys extends View {
       .replace(/\+/g, "-");
   }
 
-  async saveCustomKey(cx) {
+  saveCustomKey(cx) {
     const rawKey = this.customKeyInput.value();
     const chord = this.normalizeKey(rawKey);
     if (!chord) {
@@ -82,89 +103,112 @@ export default class CompanyHotkeys extends View {
     this.notice = `Saving hotkey ${chord}…`;
     cx.notify();
 
-    try {
-      const raw = await readTextFile("keys.json").catch(() => null);
-      let data = {};
-      if (raw) {
-        try { data = JSON.parse(raw); } catch { data = {}; }
+    cx.spawn(async (cx) => {
+      try {
+        const raw = await readTextFile("keys.json").catch(() => null);
+        let data = {};
+        if (raw) {
+          try { data = JSON.parse(raw); } catch { data = {}; }
+        }
+        data.global = data.global ?? {};
+        data.terminal = data.terminal ?? {};
+
+        data.global[chord] = this.targetAction;
+        data.terminal[chord] = this.targetAction;
+
+        if (this.targetAction === "mod.open:company-switcher") {
+          data["mod:company-switcher"] = data["mod:company-switcher"] ?? {};
+          data["mod:company-switcher"][chord] = "company-switcher.cycle";
+        }
+
+        const nextRaw = JSON.stringify(data, null, 2) + "\n";
+        await writeTextFile("keys.json", nextRaw, raw);
+        this.customKeyInput.set_value("");
+        this.notice = `✓ Saved: ${chord} → ${this.targetAction}! Applied live to keys.json.`;
+      } catch (err) {
+        this.notice = `Error saving hotkey: ${err?.message ?? err}`;
+      } finally {
+        this.loading = false;
+        cx.notify();
       }
-      data.global = data.global ?? {};
-      data.terminal = data.terminal ?? {};
-
-      data.global[chord] = this.targetAction;
-      data.terminal[chord] = this.targetAction;
-
-      const nextRaw = JSON.stringify(data, null, 2) + "\n";
-      await writeTextFile("keys.json", nextRaw, raw);
-      this.notice = `✓ Saved: ${chord} → ${this.targetAction}! Applied live to keys.json.`;
-    } catch (err) {
-      this.notice = `Error saving hotkey: ${err?.message ?? err}`;
-    } finally {
-      this.loading = false;
-      cx.notify();
-    }
+    });
   }
 
-  async removeKey(chord, cx) {
+  removeKey(chord, cx) {
     this.loading = true;
     this.notice = `Removing hotkey ${chord}…`;
     cx.notify();
 
-    try {
-      const raw = await readTextFile("keys.json").catch(() => null);
-      let data = {};
-      if (raw) {
-        try { data = JSON.parse(raw); } catch { data = {}; }
-      }
-      if (data.global) delete data.global[chord];
-      if (data.terminal) delete data.terminal[chord];
+    cx.spawn(async (cx) => {
+      try {
+        const raw = await readTextFile("keys.json").catch(() => null);
+        let data = {};
+        if (raw) {
+          try { data = JSON.parse(raw); } catch { data = {}; }
+        }
+        if (data.global) delete data.global[chord];
+        if (data.terminal) delete data.terminal[chord];
+        if (data["mod:company-switcher"]) delete data["mod:company-switcher"][chord];
 
-      const nextRaw = JSON.stringify(data, null, 2) + "\n";
-      await writeTextFile("keys.json", nextRaw, raw);
-      this.notice = `✓ Removed hotkey: ${chord}.`;
-    } catch (err) {
-      this.notice = `Error removing hotkey: ${err?.message ?? err}`;
-    } finally {
-      this.loading = false;
-      cx.notify();
-    }
+        const nextRaw = JSON.stringify(data, null, 2) + "\n";
+        await writeTextFile("keys.json", nextRaw, raw);
+        this.notice = `✓ Removed hotkey: ${chord}.`;
+      } catch (err) {
+        this.notice = `Error removing hotkey: ${err?.message ?? err}`;
+      } finally {
+        this.loading = false;
+        cx.notify();
+      }
+    });
   }
 
-  async applyPreset(presetKey, cx) {
+  applyPreset(presetKey, cx) {
     const preset = PRESETS[presetKey];
     if (!preset) return;
     this.loading = true;
     this.notice = `Applying ${preset.name}…`;
     cx.notify();
 
-    try {
-      const raw = await readTextFile("keys.json").catch(() => null);
-      let data = {};
-      if (raw) {
-        try { data = JSON.parse(raw); } catch { data = {}; }
-      }
-      data.global = data.global ?? {};
-      data.terminal = data.terminal ?? {};
-
-      for (const [key, action] of Object.entries(preset.keys)) {
-        if (action === null) {
-          delete data.global[key];
-          delete data.terminal[key];
-        } else {
-          data.global[key] = action;
-          data.terminal[key] = action;
+    cx.spawn(async (cx) => {
+      try {
+        const raw = await readTextFile("keys.json").catch(() => null);
+        let data = {};
+        if (raw) {
+          try { data = JSON.parse(raw); } catch { data = {}; }
         }
-      }
+        data.global = data.global ?? {};
+        data.terminal = data.terminal ?? {};
 
-      const nextRaw = JSON.stringify(data, null, 2) + "\n";
-      await writeTextFile("keys.json", nextRaw, raw);
-      this.notice = `✓ Applied: ${preset.name}! Updated live in keys.json.`;
-    } catch (err) {
-      this.notice = `Error saving hotkeys: ${err?.message ?? err}`;
-    } finally {
-      this.loading = false;
-      cx.notify();
-    }
+        for (const [key, action] of Object.entries(preset.keys)) {
+          if (action === null) {
+            delete data.global[key];
+            delete data.terminal[key];
+          } else {
+            data.global[key] = action;
+            data.terminal[key] = action;
+          }
+        }
+
+        if (preset.switcherKeys) {
+          data["mod:company-switcher"] = { ...preset.switcherKeys };
+        } else {
+          delete data["mod:company-switcher"];
+          delete data.global["alt-["];
+          delete data.global["alt-]"];
+          delete data.terminal["alt-["];
+          delete data.terminal["alt-]"];
+        }
+
+        const nextRaw = JSON.stringify(data, null, 2) + "\n";
+        await writeTextFile("keys.json", nextRaw, raw);
+        this.notice = `✓ Applied: ${preset.name}! Updated live in keys.json.`;
+      } catch (err) {
+        this.notice = `Error saving hotkeys: ${err?.message ?? err}`;
+      } finally {
+        this.loading = false;
+        cx.notify();
+      }
+    });
   }
 
   getCurrentNavBindings() {
@@ -188,22 +232,22 @@ export default class CompanyHotkeys extends View {
       .track_focus(this.handle)
       .on_key_down((e, cx) => {
         if (e.key === "escape") {
-          closeOverlay(props()?.overlay);
+          this.closeModal();
           cx.stop_propagation();
         }
       })
       .size_full()
       .min_h(0)
-      .p(16)
-      .gap(12)
+      .p(14)
+      .gap(10)
       .bg("#181825")
-      .rounded(14)
+      .rounded(12)
       .border_1()
       .border_color("#ffffff14")
-      .text_size(13)
+      .text_size(12.5)
       .child(
         h_flex()
-          .h(32)
+          .h(28)
           .items_center()
           .justify_between()
           .child(
@@ -212,87 +256,89 @@ export default class CompanyHotkeys extends View {
               .items_center()
               .child(
                 h_flex()
-                  .size(24)
-                  .rounded(6)
+                  .size(22)
+                  .rounded(5)
                   .bg("#89b4fa22")
                   .items_center()
                   .justify_center()
-                  .child(div().text_size(12).font_bold().text_color("#89b4fa").child("⌨")),
+                  .child(div().text_size(11).font_bold().text_color("#89b4fa").child("⌨")),
               )
               .child(
                 div()
-                  .text_size(14)
+                  .text_size(13.5)
                   .font_semibold()
                   .text_color("#cdd6f4")
                   .child("Pixel HQ Hotkeys"),
               ),
           )
           .child(
-            div()
-              .id("btn-esc")
+            h_flex()
+              .id("btn-esc-hotkeys")
               .px(8)
-              .py(3)
+              .py(2)
               .rounded(5)
               .text_size(11)
               .text_color("#6c7086")
               .cursor_pointer()
               .hover((s) => s.bg("#ffffff14").text_color("#cdd6f4"))
-              .on_click(() => closeOverlay(props()?.overlay))
+              .on_click((_e, _cx) => this.closeModal())
               .child("Esc"),
           ),
       )
       .child(
         v_flex()
+          .id("hotkeys-scroll-area")
           .flex_1()
           .min_h(0)
-          .gap(12)
+          .gap(10)
           .overflow_y_scrollbar()
           .when(Boolean(this.notice), (ch) =>
             ch.child(
               h_flex()
-                .p(8)
-                .rounded(7)
+                .p(6)
+                .rounded(6)
                 .bg("#89b4fa18")
                 .border_1()
                 .border_color("#89b4fa44")
                 .text_color("#89b4fa")
-                .text_size(12)
+                .text_size(11.5)
                 .child(this.notice),
             ),
           )
           // Section 1: Custom Hotkey Input
           .child(
             v_flex()
-              .p(12)
-              .gap(8)
-              .rounded(10)
+              .p(10)
+              .gap(6)
+              .rounded(8)
               .bg("#1e1e2e")
               .border_1()
               .border_color("#ffffff14")
               .child(
                 div()
                   .font_semibold()
-                  .text_size(13)
+                  .text_size(12)
                   .text_color("#cdd6f4")
                   .child("Custom Hotkey (Tự đặt phím tắt theo ý muốn)"),
               )
               .child(
                 div()
-                  .text_size(11)
+                  .text_size(10.5)
                   .text_color("#a6adc8")
                   .child("Choose an action and type your desired key chord (e.g. ctrl-p, alt-w, ctrl-b, alt-[):"),
               )
               .child(
                 h_flex()
-                  .gap(6)
+                  .gap(5)
                   .flex_wrap()
                   .children(
                     ACTION_OPTIONS.map((opt) => {
                       const active = this.targetAction === opt.id;
                       return h_flex()
+                        .id(`chip-${opt.key}`)
                         .px(8)
-                        .py(3)
-                        .rounded(5)
+                        .py(3.5)
+                        .rounded(4)
                         .cursor_pointer()
                         .bg(active ? "#89b4fa" : "#11111b")
                         .text_color(active ? "#181825" : "#cdd6f4")
@@ -301,7 +347,7 @@ export default class CompanyHotkeys extends View {
                         .border_1()
                         .border_color(active ? "#89b4fa" : "#ffffff10")
                         .hover((s) => s.opacity(0.85))
-                        .on_click(() => {
+                        .on_click((_e, cx) => {
                           this.targetAction = opt.id;
                           cx.notify();
                         })
@@ -311,84 +357,88 @@ export default class CompanyHotkeys extends View {
               )
               .child(
                 h_flex()
-                  .gap(8)
+                  .gap(6)
                   .items_center()
                   .child(
                     Input.new(this.customKeyInput)
-                      .h(32)
+                      .h(30)
                       .flex_1()
-                      .px(10)
-                      .rounded(6)
+                      .px(8)
+                      .rounded(5)
                       .border_1()
                       .border_color("#89b4fa66")
                       .bg("#181825")
-                      .text_size(12)
+                      .text_size(11.5)
                       .text_color("#cdd6f4"),
                   )
                   .child(
                     h_flex()
-                      .h(32)
-                      .px(14)
-                      .rounded(6)
+                      .id("btn-save-custom-hotkey")
+                      .h(30)
+                      .px(12)
+                      .rounded(5)
                       .cursor_pointer()
                       .bg("#89b4fa")
                       .items_center()
+                      .justify_center()
+                      .font_semibold()
+                      .text_size(11.5)
+                      .text_color("#181825")
                       .hover((s) => s.opacity(0.88))
-                      .on_click(() => this.saveCustomKey(cx))
-                      .child(
-                        div()
-                          .font_semibold()
-                          .text_size(12)
-                          .text_color("#181825")
-                          .child("Save Hotkey"),
-                      ),
+                      .on_click((_e, cx) => this.saveCustomKey(cx))
+                      .child(this.loading ? "Saving…" : "Save Hotkey"),
                   ),
               ),
           )
           // Section 2: Active Hotkeys
           .child(
             v_flex()
-              .p(12)
-              .gap(8)
-              .rounded(10)
+              .p(10)
+              .gap(6)
+              .rounded(8)
               .bg("#1e1e2e")
               .border_1()
               .border_color("#ffffff14")
               .child(
                 div()
                   .font_semibold()
-                  .text_size(13)
+                  .text_size(12)
                   .text_color("#cdd6f4")
                   .child("Active Hotkeys (Phím tắt đang hoạt động)"),
               )
               .child(
                 v_flex()
-                  .gap(6)
+                  .gap(4)
                   .children(
                     ACTION_OPTIONS.map((opt) => {
                       const keysList = currentBindings.get(opt.id) ?? [];
                       return h_flex()
-                        .p(6)
-                        .rounded(6)
+                        .id(`active-row-${opt.key}`)
+                        .px(6)
+                        .py(4)
+                        .rounded(5)
                         .bg("#181825")
                         .items_center()
                         .justify_between()
                         .child(
                           v_flex()
                             .gap(1)
-                            .child(div().text_size(12).font_medium().text_color("#cdd6f4").child(opt.label))
-                            .child(div().text_size(10.5).text_color("#6c7086").child(opt.desc)),
+                            .child(div().text_size(11.5).font_medium().text_color("#cdd6f4").child(opt.label))
+                            .child(div().text_size(10).text_color("#6c7086").child(opt.desc)),
                         )
                         .child(
                           h_flex()
-                            .gap(6)
+                            .gap(5)
                             .items_center()
+                            .flex_wrap()
                             .children(
                               keysList.length > 0
-                                ? keysList.map((k) =>
-                                    h_flex()
-                                      .h(22)
-                                      .px(6)
+                                ? keysList.map((k) => {
+                                    const cleanK = sanitizeId(k);
+                                    return h_flex()
+                                      .id(`key-tag-${cleanK}`)
+                                      .h(20)
+                                      .px(5)
                                       .gap(4)
                                       .rounded(4)
                                       .bg("#11111b")
@@ -397,25 +447,31 @@ export default class CompanyHotkeys extends View {
                                       .items_center()
                                       .child(
                                         div()
-                                          .text_size(10.5)
+                                          .text_size(10)
                                           .font_bold()
                                           .font_family(MONO)
                                           .text_color("#89b4fa")
                                           .child(k),
                                       )
                                       .child(
-                                        div()
+                                        h_flex()
+                                          .id(`btn-del-${cleanK}`)
+                                          .size(14)
+                                          .items_center()
+                                          .justify_center()
+                                          .rounded(2)
                                           .cursor_pointer()
                                           .text_size(10)
+                                          .font_bold()
                                           .text_color("#f38ba8")
-                                          .hover((s) => s.text_color("#ff0000"))
-                                          .on_click(() => this.removeKey(k, cx))
+                                          .hover((s) => s.bg("#f38ba822").text_color("#ff5555"))
+                                          .on_click((_e, cx) => this.removeKey(k, cx))
                                           .child("×"),
-                                      ),
-                                  )
+                                      );
+                                  })
                                 : [
                                     div()
-                                      .text_size(11)
+                                      .text_size(10.5)
                                       .text_color("#6c7086")
                                       .child("Not bound"),
                                   ],
@@ -428,27 +484,29 @@ export default class CompanyHotkeys extends View {
           // Section 3: Curated Presets
           .child(
             v_flex()
-              .p(12)
-              .gap(8)
-              .rounded(10)
+              .p(10)
+              .gap(6)
+              .rounded(8)
               .bg("#1e1e2e")
               .border_1()
               .border_color("#ffffff14")
               .child(
                 div()
                   .font_semibold()
-                  .text_size(13)
+                  .text_size(12)
                   .text_color("#cdd6f4")
                   .child("Curated Presets (Bộ phím tắt cấu hình sẵn)"),
               )
               .child(
                 v_flex()
-                  .gap(8)
+                  .gap(6)
                   .children(
                     Object.entries(PRESETS).map(([key, p]) =>
                       h_flex()
-                        .p(10)
-                        .rounded(8)
+                        .id(`preset-card-${key}`)
+                        .px(8)
+                        .py(6)
+                        .rounded(6)
                         .bg("#181825")
                         .border_1()
                         .border_color("#ffffff10")
@@ -456,13 +514,17 @@ export default class CompanyHotkeys extends View {
                         .justify_between()
                         .child(
                           v_flex()
+                            .flex_1()
+                            .min_w(0)
                             .gap(2)
-                            .child(div().font_semibold().text_color("#cdd6f4").child(p.name))
-                            .child(div().text_size(11).text_color("#a6adc8").child(p.desc))
+                            .child(div().font_semibold().text_size(11.5).text_color("#cdd6f4").child(p.name))
+                            .child(div().text_size(10.5).text_color("#a6adc8").child(p.desc))
                             .child(
                               h_flex()
-                                .gap(6)
-                                .pt(4)
+                                .id(`preset-badges-${key}`)
+                                .gap(5)
+                                .flex_wrap()
+                                .pt(3)
                                 .children(
                                   Object.entries(p.keys)
                                     .filter(([, act]) => act !== null)
@@ -470,41 +532,42 @@ export default class CompanyHotkeys extends View {
                                       h_flex()
                                         .h(18)
                                         .px(5)
-                                        .rounded(4)
+                                        .rounded(3)
                                         .bg("#11111b")
                                         .items_center()
-                                        .gap(4)
+                                        .gap(3)
                                         .child(
                                           div()
-                                            .text_size(10)
+                                            .text_size(9.5)
                                             .font_bold()
                                             .font_family(MONO)
                                             .text_color("#89b4fa")
                                             .child(k),
                                         )
-                                        .child(div().text_size(9).text_color("#6c7086").child("→"))
-                                        .child(div().text_size(9.5).text_color("#a6adc8").child(act)),
+                                        .child(div().text_size(8.5).text_color("#6c7086").child("→"))
+                                        .child(div().text_size(9).text_color("#a6adc8").child(act)),
                                     ),
                                 ),
                             ),
                         )
                         .child(
                           h_flex()
-                            .h(28)
-                            .px(10)
-                            .rounded(6)
+                            .id(`btn-apply-${key}`)
+                            .flex_none()
+                            .ml(12)
+                            .h(26)
+                            .px(11)
+                            .rounded(5)
                             .cursor_pointer()
                             .bg("#89b4fa")
                             .items_center()
+                            .justify_center()
+                            .font_semibold()
+                            .text_size(11)
+                            .text_color("#181825")
                             .hover((s) => s.opacity(0.88))
-                            .on_click(() => this.applyPreset(key, cx))
-                            .child(
-                              div()
-                                .font_semibold()
-                                .text_size(11.5)
-                                .text_color("#181825")
-                                .child("Apply"),
-                            ),
+                            .on_click((_e, cx) => this.applyPreset(key, cx))
+                            .child("Apply"),
                         ),
                     ),
                   ),
@@ -514,7 +577,7 @@ export default class CompanyHotkeys extends View {
       .child(
         h_flex()
           .justify_between()
-          .text_size(11)
+          .text_size(10.5)
           .text_color("#6c7086")
           .child("Changes saved directly to ~/.config/herdr-app/keys.json")
           .child("Esc close"),
