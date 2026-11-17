@@ -146,17 +146,16 @@ if pid_str and pid_str.isdigit():
             break
   except Exception: pass
 if not fpath and os.path.isdir(sessions_dir):
-  files = glob.glob(os.path.join(sessions_dir, "*", "*", "*", "rollout-*.jsonl"))
+  files = glob.glob(os.path.join(sessions_dir, "**", "rollout-*.jsonl"), recursive=True)
   if files:
     files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
     if cwd:
-      needle1 = f'"cwd":"{cwd}"'
-      needle2 = f'"cwd": "{cwd}"'
+      norm_cwd = cwd.replace('\\\\', '/').rstrip('/')
       for cand in files[:40]:
         try:
           with open(cand, "r", encoding="utf-8") as f:
             first = f.readline()
-            if needle1 in first or needle2 in first:
+            if f'"cwd":"{cwd}"' in first or f'"cwd": "{cwd}"' in first or norm_cwd in first.replace('\\\\\\\\', '/'):
               fpath = cand
               break
         except Exception: pass
@@ -667,10 +666,14 @@ export default class Agents extends View {
         try {
           const a = agents().find((x) => x.address === addr);
           const t = termMap.get(addr);
-          const sp = spaces().find((s) => s.id === (a?.space ?? t?.labels?.["herdr.space"]));
-          const machine = sp?.machine;
+          const spaceId = a?.space ?? t?.labels?.["herdr.space"];
+          const sp = spaces().find((s) => s.id === spaceId || (spaceId && s.id.endsWith("/" + spaceId)));
+          const machine = (typeof addr === "string" && addr.includes("/")) ? addr.split("/")[0] : (sp?.machine || undefined);
           const targetAddr = cleanAddr(addr);
-          const info = JSON.parse((await hc(["get", targetAddr, "--json"]).catch(() => ({ stdout: "{}" }))).stdout || "{}");
+          let info = JSON.parse((await hc(["get", addr, "--json"]).catch(() => ({ stdout: "{}" }))).stdout || "{}");
+          if ((!info?.foreground && !info?.cwd) && targetAddr !== addr) {
+            info = JSON.parse((await hc(["get", targetAddr, "--json"]).catch(() => ({ stdout: "{}" }))).stdout || "{}");
+          }
           const pid = info?.foreground?.pid;
           const cwd = info?.foreground?.cwd || info?.cwd || (a?.pane ? paneBy.get(a.pane)?.cwd : null);
           const candidates = window()?.platform === "windows" && !machine ? ["python", "python3", "py"] : ["python3", "python"];
@@ -683,14 +686,17 @@ export default class Agents extends View {
               if (targetAddr !== addr) {
                 next.set(targetAddr, { pct: ev.pct ?? null, model: ev.model ?? "codex", quota: ev.quota ?? null });
               }
-              hc(["label", targetAddr,
-                `agent.context=${ev.pct ?? ""}`,
-                `codex.context=${ev.pct ?? ""}`,
-                `agent.model=${ev.model ?? ""}`,
-                `codex.model=${ev.model ?? ""}`,
-                `agent.quota=${ev.quota ?? ""}`,
-                `codex.quota=${ev.quota ?? ""}`,
-              ]).catch(() => null);
+              for (const tgt of [addr, targetAddr]) {
+                if (!tgt) continue;
+                hc(["label", tgt,
+                  `agent.context=${ev.pct ?? ""}`,
+                  `codex.context=${ev.pct ?? ""}`,
+                  `agent.model=${ev.model ?? ""}`,
+                  `codex.model=${ev.model ?? ""}`,
+                  `agent.quota=${ev.quota ?? ""}`,
+                  `codex.quota=${ev.quota ?? ""}`,
+                ]).catch(() => null);
+              }
             }
             break;
           }
@@ -700,8 +706,8 @@ export default class Agents extends View {
       }
       for (const a of agents().filter((x) => /antigravity|agy/.test(progOf(x).toLowerCase()))) {
         try {
-          const sp = spaces().find((s) => s.id === a.space);
-          const machine = sp?.machine;
+          const sp = spaces().find((s) => s.id === a.space || (a.space && s.id.endsWith("/" + a.space)));
+          const machine = (typeof a.address === "string" && a.address.includes("/")) ? a.address.split("/")[0] : sp?.machine;
           const cwd = paneBy.get(a.pane)?.cwd;
           const quota = await this.agyQuota(machine);
           const vitals = await agyTranscriptVitals(cwd, machine);
@@ -711,14 +717,17 @@ export default class Agents extends View {
           if (targetAddr !== a.address) {
             next.set(targetAddr, { pct: vitals?.pct ?? null, model: vitals?.model ?? "agy", quota });
           }
-          hc(["label", targetAddr,
-            `agent.context=${vitals?.pct ?? ""}`,
-            `agy.context=${vitals?.pct ?? ""}`,
-            `agent.model=${vitals?.model ?? ""}`,
-            `agy.model=${vitals?.model ?? ""}`,
-            `agent.quota=${quota ?? ""}`,
-            `agy.quota=${quota ?? ""}`,
-          ]).catch(() => null);
+          for (const tgt of [a.address, targetAddr]) {
+            if (!tgt) continue;
+            hc(["label", tgt,
+              `agent.context=${vitals?.pct ?? ""}`,
+              `agy.context=${vitals?.pct ?? ""}`,
+              `agent.model=${vitals?.model ?? ""}`,
+              `agy.model=${vitals?.model ?? ""}`,
+              `agent.quota=${quota ?? ""}`,
+              `agy.quota=${quota ?? ""}`,
+            ]).catch(() => null);
+          }
         } catch {
           continue;
         }

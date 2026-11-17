@@ -35,7 +35,7 @@ def find_session_file(pid_str, cwd, home):
             pass
 
     # 2. Search recent rollout files matching cwd
-    files = glob.glob(os.path.join(sessions_dir, "*", "*", "*", "rollout-*.jsonl"))
+    files = glob.glob(os.path.join(sessions_dir, "**", "rollout-*.jsonl"), recursive=True)
     if not files:
         return None
 
@@ -43,13 +43,12 @@ def find_session_file(pid_str, cwd, home):
     files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
 
     if cwd:
-        needle1 = f'"cwd":"{cwd}"'
-        needle2 = f'"cwd": "{cwd}"'
+        norm_cwd = cwd.replace('\\', '/').rstrip('/')
         for fpath in files[:40]:
             try:
                 with open(fpath, "r", encoding="utf-8") as f:
                     first_line = f.readline()
-                    if needle1 in first_line or needle2 in first_line:
+                    if f'"cwd":"{cwd}"' in first_line or f'"cwd": "{cwd}"' in first_line or norm_cwd in first_line.replace('\\\\', '/'):
                         return fpath
             except Exception:
                 continue
