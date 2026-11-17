@@ -499,6 +499,7 @@ export default class Agents extends View {
   async scanCodex(cx) {
     if (this.scanningCodex) return;
     this.scanningCodex = true;
+    try {
       const paneBy = new Map(panes().map((p) => [p.pane, p]));
       const next = new Map();
       for (const a of agents().filter((x) => /codex/.test(String(x.program?.key ?? x.report?.app ?? x.status?.app ?? x.app ?? x.name ?? "").toLowerCase()))) {
