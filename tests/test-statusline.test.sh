@@ -86,6 +86,12 @@ test_case "Empty JSON" "{}" \
   "^$" \
   ""
 
+# Test 5: Claude Code with string model and effort level
+CLAUDE_STR_MODEL='{"model":"opus","context_window":{"used_percentage":25},"rate_limits":{"five_hour":{"used_percentage":10}},"effort":{"level":"high"}}'
+test_case "Claude Code String Model" "$CLAUDE_STR_MODEL" \
+  "opus · 25% context · 90% 5h left" \
+  "agent\.context=25.*agent\.model=opus.*agent\.effort=high"
+
 # Clean up
 rm -rf "$MOCK_BIN" "$MOCK_LOG"
 

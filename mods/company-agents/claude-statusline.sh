@@ -8,7 +8,7 @@
 # Needs python3. Outside a Herdr terminal it only prints the status.
 input=$(cat)
 fields=$(printf '%s' "$input" | python3 -c '
-import json, sys
+import json, os, sys
 try:
     d = json.load(sys.stdin)
     if not isinstance(d, dict):
@@ -27,8 +27,39 @@ def clean(v):
         out.append(ch)
     return "".join(out).replace("|", "·")
 
-m = (d.get("model") if isinstance(d.get("model"), dict) else {}) or {}
-model = clean(m.get("display_name") or m.get("id") or "")
+m = d.get("model")
+model = ""
+if isinstance(m, dict):
+    model = clean(m.get("display_name") or m.get("name") or m.get("id") or m.get("title") or "")
+elif isinstance(m, str):
+    model = clean(m)
+
+if not model:
+    model = clean(d.get("model_name") or d.get("model_id") or d.get("current_model") or "")
+
+if not model:
+    try:
+        tp = clean(d.get("transcript_path") or "")
+        if tp and os.path.exists(tp):
+            for line in open(tp, "r", encoding="utf-8"):
+                if "\"model\":" in line:
+                    try:
+                        ev = json.loads(line)
+                        mod = (ev.get("message") or {}).get("model") or ev.get("model") or (ev.get("payload") or {}).get("model")
+                        if mod and isinstance(mod, str):
+                            model = clean(mod)
+                    except Exception: pass
+    except Exception: pass
+
+if not model:
+    for sp in [os.path.expanduser("~/.claude/settings.json"), os.path.expanduser("~/.gemini/antigravity-cli/settings.json")]:
+        try:
+            if os.path.exists(sp):
+                sdata = json.load(open(sp, "r", encoding="utf-8"))
+                model = clean(sdata.get("model") or "")
+                if model: break
+        except Exception: pass
+
 c = (d.get("context_window") if isinstance(d.get("context_window"), dict) else {}) or {}
 p = c.get("used_percentage")
 if p is None:

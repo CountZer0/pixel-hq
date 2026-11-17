@@ -1,4 +1,4 @@
 {
-  "version": "1.6.1",
-  "notes": "Safe atomic settings update with retry, multi-agent busy deferral, and codex vitals integration"
+  "version": "1.6.2",
+  "notes": "Fix Claude string model parsing, direct Codex vitals scanning and terminal labeling"
 }

@@ -97,6 +97,88 @@ function vitalsBars(t, ctx, id, width) {
 // platform (the former lsof-based path needed sh and Unix).
 const homeDir = () => process.env.HOME ?? process.env.USERPROFILE ?? "";
 const agyHome = () => process.env.AGY_HOME ?? `${homeDir()}/.gemini/antigravity-cli`;
+const progOf = (a) => String(a?.program?.key ?? a?.program?.name ?? a?.agent ?? a?.report?.app ?? a?.status?.app ?? a?.app ?? a?.name ?? a?.title ?? "");
+
+const CODEX_VITALS_PY = `import glob, json, os, subprocess, sys, time
+pid_str = sys.argv[1].strip() if len(sys.argv) > 1 else ""
+cwd = sys.argv[2].strip() if len(sys.argv) > 2 else ""
+home = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
+sessions_dir = os.path.join(home, "sessions")
+fpath = None
+if pid_str and pid_str.isdigit():
+  try:
+    r = subprocess.run(["lsof", "-p", str(pid_str), "-Fn"], capture_output=True, text=True, timeout=2)
+    if r.returncode == 0:
+      for line in r.stdout.splitlines():
+        if line.startswith("n") and "/rollout-" in line and line.endswith(".jsonl"):
+          cand = line[1:].strip()
+          if os.path.isfile(cand):
+            fpath = cand
+            break
+  except Exception: pass
+if not fpath and os.path.isdir(sessions_dir):
+  files = glob.glob(os.path.join(sessions_dir, "*", "*", "*", "rollout-*.jsonl"))
+  if files:
+    files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+    if cwd:
+      needle1 = f'"cwd":"{cwd}"'
+      needle2 = f'"cwd": "{cwd}"'
+      for cand in files[:40]:
+        try:
+          with open(cand, "r", encoding="utf-8") as f:
+            first = f.readline()
+            if needle1 in first or needle2 in first:
+              fpath = cand
+              break
+        except Exception: pass
+    if not fpath:
+      fpath = files[0]
+model = None
+token_ev = None
+if fpath and os.path.isfile(fpath):
+  for _ in range(3):
+    try:
+      with open(fpath, "r", encoding="utf-8") as f:
+        for line in f:
+          if not model and '"model":' in line:
+            try:
+              d = json.loads(line)
+              p = d.get("payload") or {}
+              m = p.get("model") or (p.get("thread_settings") or {}).get("model")
+              if m and isinstance(m, str): model = m
+            except Exception: pass
+          if '"type":"token_count"' in line:
+            try: token_ev = json.loads(line)
+            except Exception: pass
+      if token_ev and model: break
+    except Exception: pass
+    time.sleep(0.05)
+if not model:
+  cfg = os.path.join(home, "config.toml")
+  if os.path.isfile(cfg):
+    try:
+      for line in open(cfg, "r", encoding="utf-8"):
+        s = line.strip()
+        if s.startswith("model =") or s.startswith("model="):
+          model = s.split("=", 1)[1].strip().strip("\"'")
+          break
+    except Exception: pass
+pct = None
+quota = None
+if token_ev:
+  info = (token_ev.get("payload") or {}).get("info") or {}
+  used = (info.get("last_token_usage") or {}).get("total_tokens") or (info.get("total_token_usage") or {}).get("total_tokens") or 0
+  win = info.get("model_context_window") or 0
+  if win > 0 and used > 0:
+    pct = max(0, min(100, round(used * 100 / win)))
+  rl = (token_ev.get("payload") or {}).get("rate_limits") or {}
+  primary = rl.get("primary") or {}
+  used_pct = primary.get("used_percent")
+  if isinstance(used_pct, (int, float)) and 0 <= used_pct <= 100:
+    quota = max(0, min(100, round(100 - used_pct)))
+print(json.dumps({"pct": pct, "model": model or "codex", "quota": quota}))
+`;
+
 const AGY_VITALS_PY = `import json, os, sys
 cwd = sys.argv[1] if len(sys.argv) > 1 else ""
 home = os.environ.get("AGY_HOME") or os.path.expanduser("~/.gemini/antigravity-cli")
@@ -424,7 +506,7 @@ export default class Agents extends View {
             run("pane.focus", { pane: a.pane });
             closeOverlay(props().overlay);
           })
-          .child(div().flex_none().child(figureFor(a.space_name, "blocked", 34, at ? Math.max(0, now - at) : 0, speciesOf(a.program?.key))))
+          .child(div().flex_none().child(figureFor(a.space_name, "blocked", 34, at ? Math.max(0, now - at) : 0, speciesOf(progOf(a)))))
           .child(v_flex().flex_1().min_w(0).gap(1)
             .child(div().truncate().text_size(12.5).text_color(t.foreground).child(name))
             .child(div().truncate().text_size(10.5).text_color(t.muted).child(sub)))
@@ -492,7 +574,7 @@ export default class Agents extends View {
   subRow(t, s, shown, compact, space) {
     const k = s.t;
     const st = kidStatus(k, this.listed);
-    const pic = this.figure(space, st, 27, this.waitOf(k.address, st, Date.now()), `fig-${k.address}`, k.program?.key);
+    const pic = this.figure(space, st, 27, this.waitOf(k.address, st, Date.now()), `fig-${k.address}`, progOf(k));
     const on = k.address === shown;
     return h_flex()
       .id(`sub-${k.address}`)
@@ -547,23 +629,38 @@ export default class Agents extends View {
     this.scanningCodex = true;
     try {
       const paneBy = new Map(panes().map((p) => [p.pane, p]));
+      const allTerms = terminals();
+      const termMap = new Map(allTerms.map((t) => [t.address, t]));
+      const codexTargets = new Set();
+      for (const x of [...agents(), ...allTerms]) {
+        const s = progOf(x).toLowerCase();
+        if (/codex/.test(s)) codexTargets.add(x.address);
+      }
       const next = new Map();
-      for (const a of agents().filter((x) => /codex/.test(String(x.program?.key ?? x.report?.app ?? x.status?.app ?? x.app ?? x.name ?? "").toLowerCase()))) {
+      for (const addr of codexTargets) {
         try {
-          const sp = spaces().find((s) => s.id === a.space);
+          const a = agents().find((x) => x.address === addr);
+          const t = termMap.get(addr);
+          const sp = spaces().find((s) => s.id === (a?.space ?? t?.labels?.["herdr.space"]));
           const machine = sp?.machine;
-          const info = JSON.parse((await hc(["get", a.address, "--json"]).catch(() => ({ stdout: "{}" }))).stdout || "{}");
+          const info = JSON.parse((await hc(["get", addr, "--json"]).catch(() => ({ stdout: "{}" }))).stdout || "{}");
           const pid = info?.foreground?.pid;
-          const cwd = paneBy.get(a.pane)?.cwd;
-          if (!pid && !cwd) continue;
-          const script = machine ? `${machine ? "~/.codex/pixel-hq-vitals.py" : ""}` : `${appHome()}/mods/company-agents/codex-vitals.py`;
+          const cwd = info?.foreground?.cwd || info?.cwd || (a?.pane ? paneBy.get(a.pane)?.cwd : null);
           const candidates = window()?.platform === "windows" && !machine ? ["python", "python3", "py"] : ["python3", "python"];
           for (const bin of candidates) {
-            const r = await exec(bin, [script || `${appHome()}/mods/company-agents/codex-vitals.py`, String(pid ?? ""), cwd ?? ""], { timeout: 8000, on: machine }).catch(() => null);
+            const r = await exec(bin, ["-c", CODEX_VITALS_PY, String(pid ?? ""), cwd ?? ""], { timeout: 8000, on: machine }).catch(() => null);
             if (!r) continue;
             const ev = r.code === 0 && r.stdout ? JSON.parse(r.stdout.trim().split("\n").pop()) : null;
             if (ev && (ev.pct != null || ev.model || ev.quota != null)) {
-              next.set(a.address, { pct: ev.pct ?? null, model: ev.model ?? "codex", quota: ev.quota ?? null });
+              next.set(addr, { pct: ev.pct ?? null, model: ev.model ?? "codex", quota: ev.quota ?? null });
+              hc(["label", addr,
+                `agent.context=${ev.pct ?? ""}`,
+                `codex.context=${ev.pct ?? ""}`,
+                `agent.model=${ev.model ?? ""}`,
+                `codex.model=${ev.model ?? ""}`,
+                `agent.quota=${ev.quota ?? ""}`,
+                `codex.quota=${ev.quota ?? ""}`,
+              ]).catch(() => null);
             }
             break;
           }
@@ -571,7 +668,7 @@ export default class Agents extends View {
           continue;
         }
       }
-      for (const a of agents().filter((x) => /antigravity|agy/.test(String(x.program?.key ?? x.report?.app ?? x.status?.app ?? x.app ?? x.name ?? "").toLowerCase()))) {
+      for (const a of agents().filter((x) => /antigravity|agy/.test(progOf(x).toLowerCase()))) {
         try {
           const sp = spaces().find((s) => s.id === a.space);
           const machine = sp?.machine;
@@ -1058,7 +1155,7 @@ export default class Agents extends View {
     // recycled pane would forever show the previous session's numbers.
     const contextOf = new Map(all.flatMap((k) => {
       const labels = k.labels ?? {};
-      const prog = String(k.program?.key ?? k.report?.app ?? k.status?.app ?? k.agent ?? "").toLowerCase();
+      const prog = progOf(k).toLowerCase();
       const isClaude = /claude/.test(prog);
       const isAgy = /antigravity|agy/.test(prog);
       const isCodex = /codex/.test(prog);
@@ -1066,7 +1163,7 @@ export default class Agents extends View {
       const model = isClaude ? (labels["claude.model"] || labels["agent.model"] || null) : (labels["agent.model"] || labels["agy.model"] || labels["codex.model"] || null);
       const v = Number.parseInt(own, 10);
       const q = Number.parseInt((isClaude ? labels["claude.quota"] ?? labels["agent.quota"] : (isAgy ? labels["agy.quota"] ?? labels["agent.quota"] : (isCodex ? labels["codex.quota"] ?? labels["agent.quota"] : labels["agent.quota"]))), 10);
-      if (!Number.isFinite(v) && !Number.isFinite(q)) return [];
+      if (!Number.isFinite(v) && !Number.isFinite(q) && !model) return [];
       return [[k.address, {
         pct: Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : null,
         model,
@@ -1085,7 +1182,7 @@ export default class Agents extends View {
     }
 
     const row = (a, i, subs = []) => {
-      const pic = figureFor(a.space_name, a.status, 45, this.waitOf(a.address, a.status, now), speciesOf(a.program?.key));
+      const pic = figureFor(a.space_name, a.status, 45, this.waitOf(a.address, a.status, now), speciesOf(progOf(a)));
       const more = detail.get(a.address);
       // An agent on another machine (`vps/t7`) says which.
       const machine = a.address.includes("/") ? a.address.split("/")[0] : null;
@@ -1323,7 +1420,7 @@ export default class Agents extends View {
           .left(away ? dx : 0).top(away ? dy : 0)
           // Glide out and back, but not while it is being dragged, so it follows the pointer exactly.
           .when(this.drag?.addr !== a.address, (el) => el.transition("left", 800).transition("top", 800))
-          .child(figureFor(a.space_name, isNudged ? "done" : a.status, PET, unseen, speciesOf(a.program?.key))))
+          .child(figureFor(a.space_name, isNudged ? "done" : a.status, PET, unseen, speciesOf(progOf(a)))))
         // Shipped: pixel confetti rains over the desk until someone looks at it.
         .when(a.status === "done", (el) => el.children([["#f9e2af", 0.10, 900], ["#f38ba8", 0.22, 1300], ["#a6e3a1", 0.34, 1000], ["#89b4fa", 0.46, 1500], ["#cba6f7", 0.58, 1100], ["#fab387", 0.70, 1400], ["#94e2d5", 0.82, 950]]
           .map(([c, fx0, p], j) => div().absolute().left(petW * fx0).top(-20).w(4).h(4).bg(c).loop("top", { from: -22 - (j % 3) * 6, to: PET * 0.55, period: p, easing: "linear" }))))
