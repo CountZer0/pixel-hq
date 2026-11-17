@@ -2,8 +2,8 @@
 // Custom hotkey management, live active bindings inspection, and curated presets.
 
 import { View, div } from "gpui-kit";
-import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { run, theme, props, closeOverlay, readTextFile, writeTextFile, keys } from "herdr";
+import { v_flex, h_flex } from "gpui-base";
+import { run, theme, props, closeOverlay, readTextFile, writeTextFile, keys, appHome } from "herdr";
 
 const MONO = "JetBrains Mono, Menlo, monospace";
 
@@ -47,29 +47,111 @@ const PRESETS = {
 };
 
 const ACTION_OPTIONS = [
-  { id: "mod.open:company-switcher", key: "switcher", label: "Floor Switcher", desc: "Open the floor switcher modal" },
-  { id: "space.next", key: "next", label: "Next Space", desc: "Jump to next workspace floor" },
-  { id: "space.prev", key: "prev", label: "Prev Space", desc: "Jump to previous workspace floor" },
-  { id: "space.new", key: "new", label: "New Space", desc: "Create new workspace floor" },
-  { id: "app.palette", key: "palette", label: "Command Palette", desc: "Open Herdr command palette" },
+  {
+    id: "mod.open:company-switcher",
+    key: "switcher",
+    label: "Floor Switcher",
+    desc: "Open the floor switcher modal",
+    preKeys: [
+      { chord: "ctrl-p", label: "Ctrl+P (Recommended - VS Code Quick Open)" },
+      { chord: "ctrl-b", label: "Ctrl+B (Tmux prefix style)" },
+      { chord: "alt-w", label: "Alt+W (Fast floor switch)" },
+      { chord: "ctrl-k", label: "Ctrl+K (Palette / Quick Open)" },
+      { chord: "alt-p", label: "Alt+P (Alt palette)" },
+    ],
+  },
+  {
+    id: "space.next",
+    key: "next",
+    label: "Next Space",
+    desc: "Jump to next workspace floor",
+    preKeys: [
+      { chord: "alt-]", label: "Alt+] (Standard next space)" },
+      { chord: "alt-n", label: "Alt+N (Tmux next space)" },
+      { chord: "ctrl-pagedown", label: "Ctrl+PageDown" },
+      { chord: "ctrl-shift-pagedown", label: "Ctrl+Shift+PageDown (Herdr default)" },
+      { chord: "alt-right", label: "Alt+Right" },
+    ],
+  },
+  {
+    id: "space.prev",
+    key: "prev",
+    label: "Prev Space",
+    desc: "Jump to previous workspace floor",
+    preKeys: [
+      { chord: "alt-[", label: "Alt+[ (Standard prev space)" },
+      { chord: "alt-p", label: "Alt+P (Tmux prev space)" },
+      { chord: "ctrl-pageup", label: "Ctrl+PageUp" },
+      { chord: "ctrl-shift-pageup", label: "Ctrl+Shift+PageUp (Herdr default)" },
+      { chord: "alt-left", label: "Alt+Left" },
+    ],
+  },
+  {
+    id: "space.new",
+    key: "new",
+    label: "New Space",
+    desc: "Create new workspace floor",
+    preKeys: [
+      { chord: "ctrl-shift-n", label: "Ctrl+Shift+N (Herdr default)" },
+      { chord: "ctrl-t", label: "Ctrl+T (Browser new tab style)" },
+      { chord: "alt-t", label: "Alt+T" },
+      { chord: "alt-c", label: "Alt+C (Tmux create style)" },
+    ],
+  },
+  {
+    id: "app.palette",
+    key: "palette",
+    label: "Command Palette",
+    desc: "Open Herdr command palette",
+    preKeys: [
+      { chord: "ctrl-shift-p", label: "Ctrl+Shift+P (Standard VS Code / Herdr)" },
+      { chord: "f1", label: "F1 (Classic VS Code command palette)" },
+      { chord: "ctrl-p", label: "Ctrl+P (Herdr default palette)" },
+    ],
+  },
 ];
 
 function sanitizeId(str) {
   return String(str).replace(/[^a-zA-Z0-9_-]/g, "-");
 }
 
+function keysPath() {
+  try {
+    const home = appHome();
+    if (home) return `${home}/keys.json`;
+  } catch {}
+  return "keys.json";
+}
+
 export default class CompanyHotkeys extends View {
   init(_props, cx) {
     this.notice = null;
-    this.loading = false;
     this.targetAction = "mod.open:company-switcher";
+    this.selectedChord = "ctrl-p";
+    this.dropdownOpen = false;
 
-    this.customKeyInput = InputState.new({ placeholder: "e.g. ctrl-p, alt-w, ctrl-b, alt-[" });
+    // Visual button states
+    this.saving = false;
+    this.justSavedChord = null;
+    this.deletingChord = null;
+    this.applyingPreset = null;
+    this.justAppliedPreset = null;
+
+    // Cache of parsed keys.json for zero-delay UI reactivity
+    this.cachedData = null;
 
     this.handle = cx.focus_handle();
     this.handle.focus();
-    this.customKeyInput.focus();
-    cx.timer.after(200, () => this.customKeyInput.focus());
+
+    cx.spawn(async (cx) => {
+      try {
+        const raw = await readTextFile(keysPath()).catch(() => null);
+        if (raw) {
+          this.cachedData = JSON.parse(raw);
+          cx.notify();
+        }
+      } catch {}
+    });
   }
 
   closeModal() {
@@ -81,31 +163,53 @@ export default class CompanyHotkeys extends View {
     }
   }
 
-  normalizeKey(input) {
-    if (!input) return "";
-    return input
-      .toLowerCase()
-      .trim()
-      .replace(/\s+/g, "")
-      .replace(/\+/g, "-");
-  }
+  getCurrentNavBindings() {
+    const map = new Map();
+    const navActions = new Set(ACTION_OPTIONS.map((a) => a.id));
 
-  saveCustomKey(cx) {
-    const rawKey = this.customKeyInput.value();
-    const chord = this.normalizeKey(rawKey);
-    if (!chord) {
-      this.notice = "Please enter a valid key chord (e.g. ctrl-p, alt-w, ctrl-b).";
-      cx.notify();
-      return;
+    if (this.cachedData?.global) {
+      for (const [chord, act] of Object.entries(this.cachedData.global)) {
+        if (navActions.has(act)) {
+          if (!map.has(act)) map.set(act, []);
+          map.get(act).push(chord);
+        }
+      }
+      return map;
     }
 
-    this.loading = true;
-    this.notice = `Saving hotkey ${chord}…`;
+    const allKeys = keys() ?? [];
+    for (const k of allKeys) {
+      if (k.section === "global" && navActions.has(k.action)) {
+        if (!map.has(k.action)) map.set(k.action, []);
+        map.get(k.action).push(k.keys);
+      }
+    }
+    return map;
+  }
+
+  isPresetActive(presetKey, currentBindings) {
+    const preset = PRESETS[presetKey];
+    if (!preset) return false;
+    for (const [chord, act] of Object.entries(preset.keys)) {
+      if (act === null) continue;
+      const bound = currentBindings.get(act) ?? [];
+      if (!bound.includes(chord)) return false;
+    }
+    return true;
+  }
+
+  saveSelectedKey(cx) {
+    const chord = this.selectedChord;
+    if (!chord) return;
+
+    this.saving = true;
+    this.notice = `Assigning ${chord}…`;
     cx.notify();
 
     cx.spawn(async (cx) => {
       try {
-        const raw = await readTextFile("keys.json").catch(() => null);
+        const p = keysPath();
+        const raw = await readTextFile(p).catch(() => null);
         let data = {};
         if (raw) {
           try { data = JSON.parse(raw); } catch { data = {}; }
@@ -122,26 +226,35 @@ export default class CompanyHotkeys extends View {
         }
 
         const nextRaw = JSON.stringify(data, null, 2) + "\n";
-        await writeTextFile("keys.json", nextRaw, raw);
-        this.customKeyInput.set_value("");
-        this.notice = `✓ Saved: ${chord} → ${this.targetAction}! Applied live to keys.json.`;
+        await writeTextFile(p, nextRaw, raw);
+
+        this.cachedData = data;
+        this.justSavedChord = chord;
+        this.notice = `✓ Assigned: ${chord} → ${this.targetAction}! Updated live in keys.json.`;
+        cx.notify();
+
+        cx.timer.after(2500, () => {
+          this.justSavedChord = null;
+          cx.notify();
+        });
       } catch (err) {
         this.notice = `Error saving hotkey: ${err?.message ?? err}`;
       } finally {
-        this.loading = false;
+        this.saving = false;
         cx.notify();
       }
     });
   }
 
   removeKey(chord, cx) {
-    this.loading = true;
+    this.deletingChord = chord;
     this.notice = `Removing hotkey ${chord}…`;
     cx.notify();
 
     cx.spawn(async (cx) => {
       try {
-        const raw = await readTextFile("keys.json").catch(() => null);
+        const p = keysPath();
+        const raw = await readTextFile(p).catch(() => null);
         let data = {};
         if (raw) {
           try { data = JSON.parse(raw); } catch { data = {}; }
@@ -151,12 +264,14 @@ export default class CompanyHotkeys extends View {
         if (data["mod:company-switcher"]) delete data["mod:company-switcher"][chord];
 
         const nextRaw = JSON.stringify(data, null, 2) + "\n";
-        await writeTextFile("keys.json", nextRaw, raw);
+        await writeTextFile(p, nextRaw, raw);
+
+        this.cachedData = data;
         this.notice = `✓ Removed hotkey: ${chord}.`;
       } catch (err) {
         this.notice = `Error removing hotkey: ${err?.message ?? err}`;
       } finally {
-        this.loading = false;
+        this.deletingChord = null;
         cx.notify();
       }
     });
@@ -165,13 +280,15 @@ export default class CompanyHotkeys extends View {
   applyPreset(presetKey, cx) {
     const preset = PRESETS[presetKey];
     if (!preset) return;
-    this.loading = true;
+
+    this.applyingPreset = presetKey;
     this.notice = `Applying ${preset.name}…`;
     cx.notify();
 
     cx.spawn(async (cx) => {
       try {
-        const raw = await readTextFile("keys.json").catch(() => null);
+        const p = keysPath();
+        const raw = await readTextFile(p).catch(() => null);
         let data = {};
         if (raw) {
           try { data = JSON.parse(raw); } catch { data = {}; }
@@ -200,38 +317,45 @@ export default class CompanyHotkeys extends View {
         }
 
         const nextRaw = JSON.stringify(data, null, 2) + "\n";
-        await writeTextFile("keys.json", nextRaw, raw);
+        await writeTextFile(p, nextRaw, raw);
+
+        this.cachedData = data;
+        this.justAppliedPreset = presetKey;
         this.notice = `✓ Applied: ${preset.name}! Updated live in keys.json.`;
+        cx.notify();
+
+        cx.timer.after(2500, () => {
+          this.justAppliedPreset = null;
+          cx.notify();
+        });
       } catch (err) {
         this.notice = `Error saving hotkeys: ${err?.message ?? err}`;
       } finally {
-        this.loading = false;
+        this.applyingPreset = null;
         cx.notify();
       }
     });
   }
 
-  getCurrentNavBindings() {
-    const allKeys = keys() ?? [];
-    const navActions = new Set(ACTION_OPTIONS.map((a) => a.id));
-    const map = new Map();
-    for (const k of allKeys) {
-      if (k.section === "global" && navActions.has(k.action)) {
-        if (!map.has(k.action)) map.set(k.action, []);
-        map.get(k.action).push(k.keys);
-      }
-    }
-    return map;
-  }
-
   render(cx) {
     const currentBindings = this.getCurrentNavBindings();
+    const curAction = ACTION_OPTIONS.find((a) => a.id === this.targetAction) ?? ACTION_OPTIONS[0];
+
+    // Ensure selected chord is valid for current action
+    const currentPreKey = curAction.preKeys.find((pk) => pk.chord === this.selectedChord) ?? curAction.preKeys[0];
+    const isBound = (currentBindings.get(this.targetAction) ?? []).includes(this.selectedChord);
 
     return v_flex()
       .id("company-hotkeys")
       .track_focus(this.handle)
       .on_key_down((e, cx) => {
         if (e.key === "escape") {
+          if (this.dropdownOpen) {
+            this.dropdownOpen = false;
+            cx.stop_propagation();
+            cx.notify();
+            return;
+          }
           this.closeModal();
           cx.stop_propagation();
         }
@@ -305,7 +429,7 @@ export default class CompanyHotkeys extends View {
                 .child(this.notice),
             ),
           )
-          // Section 1: Custom Hotkey Input
+          // Section 1: Pre-defined Key Dropdown Selector
           .child(
             v_flex()
               .p(10)
@@ -319,13 +443,13 @@ export default class CompanyHotkeys extends View {
                   .font_semibold()
                   .text_size(12)
                   .text_color("#cdd6f4")
-                  .child("Custom Hotkey (Tự đặt phím tắt theo ý muốn)"),
+                  .child("Assign Hotkey (Chọn phím tắt sẵn có)"),
               )
               .child(
                 div()
                   .text_size(10.5)
                   .text_color("#a6adc8")
-                  .child("Choose an action and type your desired key chord (e.g. ctrl-p, alt-w, ctrl-b, alt-[):"),
+                  .child("1. Chọn chức năng muốn gán phím tắt:"),
               )
               .child(
                 h_flex()
@@ -349,6 +473,8 @@ export default class CompanyHotkeys extends View {
                         .hover((s) => s.opacity(0.85))
                         .on_click((_e, cx) => {
                           this.targetAction = opt.id;
+                          this.selectedChord = opt.preKeys[0].chord;
+                          this.dropdownOpen = false;
                           cx.notify();
                         })
                         .child(opt.label);
@@ -356,38 +482,170 @@ export default class CompanyHotkeys extends View {
                   ),
               )
               .child(
+                div()
+                  .pt(2)
+                  .text_size(10.5)
+                  .text_color("#a6adc8")
+                  .child("2. Chọn phím tắt định sẵn và gán:"),
+              )
+              .child(
                 h_flex()
                   .gap(6)
                   .items_center()
                   .child(
-                    Input.new(this.customKeyInput)
-                      .h(30)
+                    h_flex()
+                      .id("dropdown-trigger")
                       .flex_1()
-                      .px(8)
+                      .h(32)
+                      .px(10)
                       .rounded(5)
                       .border_1()
-                      .border_color("#89b4fa66")
-                      .bg("#181825")
-                      .text_size(11.5)
-                      .text_color("#cdd6f4"),
+                      .border_color(this.dropdownOpen ? "#89b4fa" : "#ffffff18")
+                      .bg("#11111b")
+                      .items_center()
+                      .justify_between()
+                      .cursor_pointer()
+                      .hover((s) => s.border_color("#89b4fa88"))
+                      .on_click((_e, cx) => {
+                        this.dropdownOpen = !this.dropdownOpen;
+                        cx.notify();
+                      })
+                      .child(
+                        h_flex()
+                          .gap(8)
+                          .items_center()
+                          .child(
+                            h_flex()
+                              .h(20)
+                              .px(6)
+                              .rounded(4)
+                              .bg("#181825")
+                              .border_1()
+                              .border_color("#89b4fa44")
+                              .items_center()
+                              .child(
+                                div()
+                                  .text_size(10)
+                                  .font_bold()
+                                  .font_family(MONO)
+                                  .text_color("#89b4fa")
+                                  .child(currentPreKey.chord),
+                              ),
+                          )
+                          .child(
+                            div()
+                              .text_size(11)
+                              .text_color("#cdd6f4")
+                              .child(currentPreKey.label),
+                          ),
+                      )
+                      .child(
+                        div()
+                          .text_size(9)
+                          .text_color("#89b4fa")
+                          .child(this.dropdownOpen ? "▲" : "▼"),
+                      ),
                   )
                   .child(
                     h_flex()
-                      .id("btn-save-custom-hotkey")
-                      .h(30)
-                      .px(12)
+                      .id("btn-assign-hotkey")
+                      .h(32)
+                      .px(14)
                       .rounded(5)
                       .cursor_pointer()
-                      .bg("#89b4fa")
+                      .when(this.justSavedChord === this.selectedChord, (el) =>
+                        el.bg("#a6e3a1").text_color("#181825"),
+                      )
+                      .when(this.justSavedChord !== this.selectedChord && !isBound, (el) =>
+                        el.bg("#89b4fa").text_color("#181825").hover((s) => s.opacity(0.88)),
+                      )
+                      .when(this.justSavedChord !== this.selectedChord && isBound, (el) =>
+                        el.bg("#313244").text_color("#a6adc8"),
+                      )
                       .items_center()
                       .justify_center()
                       .font_semibold()
                       .text_size(11.5)
-                      .text_color("#181825")
-                      .hover((s) => s.opacity(0.88))
-                      .on_click((_e, cx) => this.saveCustomKey(cx))
-                      .child(this.loading ? "Saving…" : "Save Hotkey"),
+                      .on_click((_e, cx) => this.saveSelectedKey(cx))
+                      .child(
+                        this.saving
+                          ? "Saving…"
+                          : this.justSavedChord === this.selectedChord
+                          ? "✓ Assigned!"
+                          : isBound
+                          ? "✓ Bound"
+                          : "+ Assign",
+                      ),
                   ),
+              )
+              // Dropdown Menu List
+              .when(this.dropdownOpen, (el) =>
+                el.child(
+                  v_flex()
+                    .id("dropdown-menu")
+                    .p(4)
+                    .gap(2)
+                    .rounded(6)
+                    .bg("#11111b")
+                    .border_1()
+                    .border_color("#89b4fa55")
+                    .children(
+                      curAction.preKeys.map((pk) => {
+                        const isSelected = this.selectedChord === pk.chord;
+                        const cleanK = sanitizeId(pk.chord);
+                        return h_flex()
+                          .id(`opt-prekey-${cleanK}`)
+                          .px(8)
+                          .py(5)
+                          .rounded(4)
+                          .items_center()
+                          .justify_between()
+                          .cursor_pointer()
+                          .when(isSelected, (el) => el.bg("#89b4fa22"))
+                          .hover((s) => s.bg("#ffffff12"))
+                          .on_click((_e, cx) => {
+                            this.selectedChord = pk.chord;
+                            this.dropdownOpen = false;
+                            cx.notify();
+                          })
+                          .child(
+                            h_flex()
+                              .gap(8)
+                              .items_center()
+                              .child(
+                                h_flex()
+                                  .h(19)
+                                  .px(5)
+                                  .rounded(3)
+                                  .bg("#181825")
+                                  .border_1()
+                                  .border_color("#89b4fa33")
+                                  .items_center()
+                                  .child(
+                                    div()
+                                      .text_size(9.5)
+                                      .font_bold()
+                                      .font_family(MONO)
+                                      .text_color("#89b4fa")
+                                      .child(pk.chord),
+                                  ),
+                              )
+                              .child(
+                                div()
+                                  .text_size(10.5)
+                                  .text_color(isSelected ? "#89b4fa" : "#cdd6f4")
+                                  .child(pk.label),
+                              ),
+                          )
+                          .child(
+                            div()
+                              .text_size(10.5)
+                              .text_color("#89b4fa")
+                              .child(isSelected ? "✓" : ""),
+                          );
+                      }),
+                    ),
+                ),
               ),
           )
           // Section 2: Active Hotkeys
@@ -435,6 +693,7 @@ export default class CompanyHotkeys extends View {
                               keysList.length > 0
                                 ? keysList.map((k) => {
                                     const cleanK = sanitizeId(k);
+                                    const isDeleting = this.deletingChord === k;
                                     return h_flex()
                                       .id(`key-tag-${cleanK}`)
                                       .h(20)
@@ -463,10 +722,10 @@ export default class CompanyHotkeys extends View {
                                           .cursor_pointer()
                                           .text_size(10)
                                           .font_bold()
-                                          .text_color("#f38ba8")
+                                          .text_color(isDeleting ? "#a6adc8" : "#f38ba8")
                                           .hover((s) => s.bg("#f38ba822").text_color("#ff5555"))
                                           .on_click((_e, cx) => this.removeKey(k, cx))
-                                          .child("×"),
+                                          .child(isDeleting ? "…" : "×"),
                                       );
                                   })
                                 : [
@@ -501,15 +760,19 @@ export default class CompanyHotkeys extends View {
                 v_flex()
                   .gap(6)
                   .children(
-                    Object.entries(PRESETS).map(([key, p]) =>
-                      h_flex()
+                    Object.entries(PRESETS).map(([key, p]) => {
+                      const isActive = this.isPresetActive(key, currentBindings);
+                      const isApplying = this.applyingPreset === key;
+                      const isJustApplied = this.justAppliedPreset === key;
+
+                      return h_flex()
                         .id(`preset-card-${key}`)
                         .px(8)
                         .py(6)
                         .rounded(6)
                         .bg("#181825")
                         .border_1()
-                        .border_color("#ffffff10")
+                        .border_color(isActive ? "#a6e3a155" : "#ffffff10")
                         .items_center()
                         .justify_between()
                         .child(
@@ -517,7 +780,27 @@ export default class CompanyHotkeys extends View {
                             .flex_1()
                             .min_w(0)
                             .gap(2)
-                            .child(div().font_semibold().text_size(11.5).text_color("#cdd6f4").child(p.name))
+                            .child(
+                              h_flex()
+                                .gap(6)
+                                .items_center()
+                                .child(div().font_semibold().text_size(11.5).text_color("#cdd6f4").child(p.name))
+                                .when(isActive, (el) =>
+                                  el.child(
+                                    h_flex()
+                                      .px(5)
+                                      .py(1)
+                                      .rounded(3)
+                                      .bg("#a6e3a122")
+                                      .border_1()
+                                      .border_color("#a6e3a155")
+                                      .text_color("#a6e3a1")
+                                      .font_bold()
+                                      .text_size(9.5)
+                                      .child("ACTIVE"),
+                                  ),
+                                ),
+                            )
                             .child(div().text_size(10.5).text_color("#a6adc8").child(p.desc))
                             .child(
                               h_flex()
@@ -559,17 +842,35 @@ export default class CompanyHotkeys extends View {
                             .px(11)
                             .rounded(5)
                             .cursor_pointer()
-                            .bg("#89b4fa")
+                            .when(isJustApplied, (el) =>
+                              el.bg("#a6e3a1").text_color("#181825"),
+                            )
+                            .when(!isJustApplied && isActive, (el) =>
+                              el
+                                .bg("#a6e3a118")
+                                .border_1()
+                                .border_color("#a6e3a1")
+                                .text_color("#a6e3a1"),
+                            )
+                            .when(!isJustApplied && !isActive, (el) =>
+                              el.bg("#89b4fa").text_color("#181825").hover((s) => s.opacity(0.88)),
+                            )
                             .items_center()
                             .justify_center()
                             .font_semibold()
                             .text_size(11)
-                            .text_color("#181825")
-                            .hover((s) => s.opacity(0.88))
                             .on_click((_e, cx) => this.applyPreset(key, cx))
-                            .child("Apply"),
-                        ),
-                    ),
+                            .child(
+                              isApplying
+                                ? "Applying…"
+                                : isJustApplied
+                                ? "✓ Applied!"
+                                : isActive
+                                ? "✓ Active"
+                                : "Apply",
+                            ),
+                        );
+                    }),
                   ),
               ),
           ),
@@ -579,7 +880,7 @@ export default class CompanyHotkeys extends View {
           .justify_between()
           .text_size(10.5)
           .text_color("#6c7086")
-          .child("Changes saved directly to ~/.config/herdr-app/keys.json")
+          .child("Changes saved live to ~/.config/herdr-app/keys.json")
           .child("Esc close"),
       );
   }
