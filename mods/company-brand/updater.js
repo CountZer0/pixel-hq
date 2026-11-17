@@ -82,9 +82,14 @@ export async function checkPixelHqUpdate(notifyUser = true) {
       return null;
     }
 
+    const curVer = mine?.version ? String(mine.version) : "";
+    const newVer = String(latest.version);
+    const versionLabel = curVer && curVer !== newVer ? `v${curVer} → v${newVer}` : `v${newVer}`;
     const urgent = isUrgentUpdate(latest.type);
     const upd = {
-      version: String(latest.version),
+      version: newVer,
+      currentVersion: curVer,
+      versionLabel,
       type: latest.type ? String(latest.type) : (urgent ? "urgent" : "normal"),
       isUrgent: urgent,
       notes: latest.notes ? String(latest.notes) : "",
@@ -95,8 +100,8 @@ export async function checkPixelHqUpdate(notifyUser = true) {
     if (notifyUser && dismissed !== upd.version) {
       if (urgent) {
         notify({
-          title: `⚠️ Urgent Pixel HQ update: v${upd.version}`,
-          body: upd.notes ? `${upd.notes} · Click to update now` : `Critical update v${upd.version} is out · Click to update now`,
+          title: `⚠️ Urgent Pixel HQ update: ${versionLabel}`,
+          body: upd.notes ? `${upd.notes} · Click to update now` : `Critical update ${versionLabel} is out · Click to update now`,
           level: "warning",
           timeout: 30000,
           action: { name: "company-brand.update" },
@@ -104,7 +109,7 @@ export async function checkPixelHqUpdate(notifyUser = true) {
       } else {
         notify({
           title: "Pixel HQ update available",
-          body: `Version ${upd.version} is out · Click to update`,
+          body: `Version ${versionLabel} is out · Click to update`,
           level: "info",
           timeout: 10000,
           action: { name: "company-brand.update" },

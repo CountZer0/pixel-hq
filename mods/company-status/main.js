@@ -35,10 +35,11 @@ export default class WorkspaceStatus extends View {
         const upd = shared("pixel-hq.new-version");
         const urgent = Boolean(upd?.isUrgent);
         const pillBg = urgent ? (t.blocked ?? "#f38ba8") : t.accent;
-        const pillText = urgent ? `⚠️ Urgent update: v${upd.version}` : `✨ New update: v${upd.version}`;
+        const verText = upd?.versionLabel ?? `v${upd.version}`;
+        const pillText = urgent ? `⚠️ Urgent update: ${verText}` : `✨ New update: ${verText}`;
         const tooltip = urgent
-          ? `[Urgent Update] Pixel HQ v${upd.version} is out${upd.notes ? ` · ${upd.notes}` : ""} · Click to update now`
-          : `Pixel HQ v${upd.version} is out${upd.notes ? ` · ${upd.notes}` : ""} · Click to update`;
+          ? `[Urgent Update] Pixel HQ ${verText} is out${upd.notes ? ` · ${upd.notes}` : ""} · Click to update now`
+          : `Pixel HQ ${verText} is out${upd.notes ? ` · ${upd.notes}` : ""} · Click to update`;
         return el.child(
           h_flex().id("update-status-pill").gap(6).items_center().px(7).py(2).rounded(6)
             .bg(pillBg).text_color(t.chrome).cursor_pointer().hover(s => s.opacity(0.85))
