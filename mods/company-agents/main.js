@@ -85,10 +85,10 @@ function thinBar(t, pct, color, width) {
 const hpColor = (t, pct) => (pct >= 80 ? t.ansi1 : pct >= 60 ? t.ansi3 : t.ansi2);
 const spColor = (t, left) => (left <= 10 ? t.ansi1 : left <= 30 ? t.ansi3 : "#89b4fa");
 const modelOf = (ctx) => (ctx.model ? [ctx.model, ctx.effort].filter(Boolean).join(" · ") : ctx.effort ? `effort ${ctx.effort}` : "");
-const vitalsTip = (ctx) => `Context ${ctx.pct}% used${ctx.quota != null ? ` · ${ctx.quota}% of the 5-hour window left` : ""}${modelOf(ctx) ? ` · ${modelOf(ctx)}` : ""}`;
+const vitalsTip = (ctx) => [ctx.pct != null ? `Context ${ctx.pct}% used` : null, ctx.quota != null ? `${ctx.quota}% of the quota window left` : null, modelOf(ctx)].filter(Boolean).join(" · ");
 function vitalsBars(t, ctx, id, width) {
   return v_flex().id(id).gap(2)
-    .child(thinBar(t, ctx.pct, hpColor(t, ctx.pct), width))
+    .when(ctx.pct != null, (el) => el.child(thinBar(t, ctx.pct, hpColor(t, ctx.pct), width)))
     .when(ctx.quota != null, (el) => el.child(thinBar(t, ctx.quota, spColor(t, ctx.quota), width)));
 }
 
@@ -106,21 +106,37 @@ fi
 [ -n "$f" ] || exit 3
 tail -n 600 "$f" | grep '"type":"token_count"' | tail -1`;
 
-// Finds an Antigravity terminal's transcript file and prints its last planner response with token usage.
-const AGY_SH = `home="\${AGY_HOME:-$HOME/.gemini/antigravity-cli}"
-pids="$1"; for i in 1 2 3; do pids="$pids $(for p in $pids; do pgrep -P "$p" 2>/dev/null; done)"; done
-cid=""
-if [ -n "$1" ]; then
-  lock=$(lsof -p "$(echo $pids | tr -s ' ' ',')" 2>/dev/null | grep -o '/presence/.*\\.lock' | head -1)
-  [ -n "$lock" ] && cid=$(basename "$lock" .lock)
-fi
-if [ -z "$cid" ] && [ -f "$home/history.jsonl" ]; then
-  cid=$(grep -F '"workspace":"'"$2"'"' "$home/history.jsonl" 2>/dev/null | tail -1 | grep -o '"conversationId":"[^"]*"' | cut -d'"' -f4)
-fi
-[ -n "$cid" ] || exit 3
-f="$home/brain/$cid/.system_generated/logs/transcript.jsonl"
-[ -f "$f" ] || exit 3
-tail -n 300 "$f" | grep '"input_tokens":' | tail -1`;
+// Reads the Antigravity transcript for a workspace: the last conversation the CLI logged for it, then the last
+// usage line with token counts. Pure file reads through the mod's own file API, so it behaves the same on every
+// platform (the former lsof-based path needed sh and Unix).
+const homeDir = () => process.env.HOME ?? process.env.USERPROFILE ?? "";
+const agyHome = () => process.env.AGY_HOME ?? `${homeDir()}/.gemini/antigravity-cli`;
+const agyTranscriptVitals = async (cwd) => {
+  if (!cwd) return null;
+  let hist;
+  try { hist = await readTextFile(`${agyHome()}/history.jsonl`); } catch { return null; }
+  const needle = `"workspace":${JSON.stringify(cwd)}`;
+  let conversationId = null;
+  for (const line of String(hist).split("\n")) {
+    if (!line.includes(needle)) continue;
+    const m = line.match(/"conversationId":"([^"]+)"/);
+    if (m) conversationId = m[1];
+  }
+  if (!conversationId) return null;
+  let transcript;
+  try { transcript = await readTextFile(`${agyHome()}/brain/${conversationId}/.system_generated/logs/transcript.jsonl`); } catch { return null; }
+  const lines = String(transcript).split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].includes('"input_tokens":')) continue;
+    try {
+      const ev = JSON.parse(lines[i]);
+      const used = (Number(ev?.input_tokens) || 0) + (Number(ev?.cache_read_tokens) || 0);
+      if (!(used > 0)) return null;
+      return { pct: Math.max(0, Math.min(100, Math.round((used * 100) / 1000000))), model: ev?.model ?? "agy" };
+    } catch { return null; }
+  }
+  return null;
+};
 
 export default class Agents extends View {
   init(_props, cx) {
@@ -172,6 +188,9 @@ export default class Agents extends View {
     // deleting the file removes it for good.
     this.notice = null;
     this.setupOpenCode(cx);
+    // The OpenCode HP plugin (directory package) is auto-discovered by every TUI from the global plugins folder:
+    // it labels the terminal with the context fill for the desk's HP bar. Same discipline as the status plugin.
+    this.setupOpenCodeHp(cx);
     // Tell the person when a newer Pixel HQ is out: read the tiny version.json from GitHub at start and every 6 hours.
     // Nothing is sent. Deleting this mod's own version.json turns the check off.
     this.update = null;
@@ -447,13 +466,15 @@ export default class Agents extends View {
   }
 
   async scanCodex(cx) {
-    if (this.scanningCodex || window()?.platform === "windows") return;
+    if (this.scanningCodex) return;
     this.scanningCodex = true;
+    const isWin = window()?.platform === "windows";
     try {
       const remote = new Set(spaces().filter((x) => x.machine).map((x) => x.id));
       const paneBy = new Map(panes().map((p) => [p.pane, p]));
       const next = new Map();
-      for (const a of agents().filter((x) => String(x.program?.key ?? "").toLowerCase().includes("codex") && !remote.has(x.space))) {
+      // Codex's session scan needs sh and lsof: POSIX only.
+      for (const a of isWin ? [] : agents().filter((x) => String(x.program?.key ?? "").toLowerCase().includes("codex") && !remote.has(x.space))) {
         const info = JSON.parse((await hc(["get", a.address, "--json"]).catch(() => ({ stdout: "{}" }))).stdout || "{}");
         const pid = info?.foreground?.pid;
         const cwd = paneBy.get(a.pane)?.cwd;
@@ -465,15 +486,11 @@ export default class Agents extends View {
       }
       for (const a of agents().filter((x) => (String(x.program?.key ?? "").toLowerCase().includes("antigravity") || x.program?.key === "agy") && !remote.has(x.space))) {
         try {
-          const info = JSON.parse((await hc(["get", a.address, "--json"]).catch(() => ({ stdout: "{}" }))).stdout || "{}");
-          const pid = info?.foreground?.pid;
           const cwd = paneBy.get(a.pane)?.cwd;
-          if (!pid && !cwd) continue;
-          const r = await exec("sh", ["-c", AGY_SH, "sh", String(pid ?? ""), cwd ?? "/dev/null/none"], { timeout: 8000 }).catch(() => null);
-          const ev = r?.code === 0 && r.stdout ? JSON.parse(r.stdout.trim().split("\n").pop()) : null;
-          const used = (ev?.input_tokens ?? 0) + (ev?.cache_read_tokens ?? 0);
-          const win = 1000000;
-          if (used > 0) next.set(a.address, { pct: Math.max(0, Math.min(100, Math.round((used * 100) / win))), model: ev?.model ?? "agy" });
+          const quota = await this.agyQuota();
+          const vitals = await agyTranscriptVitals(cwd);
+          if (!vitals && quota == null) continue;
+          next.set(a.address, { pct: vitals?.pct ?? null, model: vitals?.model ?? "agy", quota });
         } catch {
           continue;
         }
@@ -482,6 +499,30 @@ export default class Agents extends View {
       if (sig !== JSON.stringify([...this.ctxRead])) { this.ctxRead = next; cx.notify(); }
     } catch { /* no codex/agy, no lsof, odd output: no pile */ }
     this.scanningCodex = false;
+  }
+
+  async agyQuota() {
+    const memo = this.agyQuotaMemo;
+    if (memo && Date.now() - memo.at < 60000) return memo.value;
+    if (this.agyQuotaBusy) return memo?.value ?? null;
+    this.agyQuotaBusy = true;
+    let value = memo?.value ?? null;
+    try {
+      const script = `${appHome()}/mods/company-agents/agy-quota.py`;
+      const candidates = window()?.platform === "windows" ? ["python", "python3", "py"] : ["python3", "python"];
+      for (const bin of candidates) {
+        const r = await exec(bin, [script], { timeout: 12000 }).catch(() => null);
+        if (!r) continue;
+        const parsed = r.code === 0 && r.stdout ? JSON.parse(r.stdout.trim().split("\n").pop()) : null;
+        if (parsed && typeof parsed.quota === "number" && Number.isFinite(parsed.quota)) {
+          value = Math.max(0, Math.min(100, Math.round(parsed.quota)));
+        }
+        break;
+      }
+    } catch { /* keep the previous answer */ }
+    this.agyQuotaMemo = { at: Date.now(), value };
+    this.agyQuotaBusy = false;
+    return value;
   }
 
   openNeedsYou() {
@@ -605,6 +646,29 @@ export default class Agents extends View {
     if (r.code === 5) { this.notice = "OpenCode plugin updated · restart OpenCode to apply"; cx.notify(); }
   }
 
+  async setupOpenCodeHp(cx) {
+    const src = `${appHome()}/mods/company-agents/opencode-hp`;
+    const had = localStorage.getItem("oc-hp-plugin") ? "1" : "0";
+    // Exit codes mirror setupOpenCode: 0 added, 3 no OpenCode folder, 4 nothing to do, 5 updated to a newer version of this plugin.
+    const sh = 'SRC="$1"; D="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"; [ -d "$D" ] || exit 3; T="$D/plugins/pixel-hq-hp"; '
+      + 'if [ -d "$T" ]; then grep -q "pixel-hq-opencode-hp" "$T/tui.tsx" 2>/dev/null || exit 4; '
+      + '[ "$(grep -o "pixel-hq-opencode-hp v[0-9]*" "$T/tui.tsx" | head -1)" = "$(grep -o "pixel-hq-opencode-hp v[0-9]*" "$SRC/tui.tsx" | head -1)" ] && exit 4; '
+      + 'rm -rf "$T" && cp -r "$SRC" "$T" || exit 1; exit 5; fi; [ "$2" = 1 ] && exit 4; mkdir -p "$D/plugins" || exit 1; cp -r "$SRC" "$T" || exit 1';
+    const ps = "param($src, $had); $c = if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { Join-Path $env:USERPROFILE '.config' }; $d = Join-Path $c 'opencode'; "
+      + "if (-not (Test-Path -LiteralPath $d)) { exit 3 }; $p = Join-Path $d 'plugins'; $t = Join-Path $p 'pixel-hq-hp'; "
+      + "if (Test-Path -LiteralPath $t) { $cur = Get-Content -Raw -LiteralPath (Join-Path $t 'tui.tsx') -ErrorAction Stop; if ($cur -notmatch 'pixel-hq-opencode-hp') { exit 4 }; "
+      + "$a = [regex]::Match($cur, 'pixel-hq-opencode-hp v\\d+').Value; $b = [regex]::Match((Get-Content -Raw -LiteralPath (Join-Path $src 'tui.tsx')), 'pixel-hq-opencode-hp v\\d+').Value; "
+      + "if ($a -eq $b) { exit 4 }; Remove-Item -LiteralPath $t -Recurse -Force; Copy-Item -Recurse -LiteralPath $src -Destination $t -ErrorAction Stop; exit 5 }; "
+      + "if ($had -eq '1') { exit 4 }; New-Item -ItemType Directory -Force -Path $p | Out-Null; Copy-Item -Recurse -LiteralPath $src -Destination $t -ErrorAction Stop";
+    const r = await (window()?.platform === "windows"
+      ? exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", `& { ${ps} } '${src.replace(/'/g, "''")}' '${had}'`])
+      : exec("sh", ["-c", sh, "sh", src, had])).catch(() => null);
+    if (!r || ![0, 4, 5].includes(r.code)) return;
+    localStorage.setItem("oc-hp-plugin", "1");
+    if (r.code === 0) { this.notice = "OpenCode HP plugin added"; cx.notify(); }
+    if (r.code === 5) { this.notice = "OpenCode HP plugin updated"; cx.notify(); }
+  }
+
   render(cx) {
     const t = theme();
     if (props()?.sortMenu) return this.sortMenu(t);
@@ -712,24 +776,25 @@ export default class Agents extends View {
     const contextOf = new Map(all.flatMap((k) => {
       const labels = k.labels ?? {};
       const prog = String(k.program?.key ?? k.report?.app ?? "").toLowerCase();
-      const own = /claude/.test(prog) ? labels["claude.context"] ?? labels["agent.context"] : labels["agent.context"];
-      const model = /claude/.test(prog) ? (labels["claude.model"] || labels["agent.model"] || null) : (labels["agent.model"] || null);
+      const isClaude = /claude/.test(prog);
+      const own = isClaude ? labels["claude.context"] ?? labels["agent.context"] : labels["agent.context"];
+      const model = isClaude ? (labels["claude.model"] || labels["agent.model"] || null) : (labels["agent.model"] || null);
       const v = Number.parseInt(own, 10);
-      if (!Number.isFinite(v)) return [];
-      const q = Number.parseInt((/claude/.test(prog) ? labels["claude.quota"] ?? labels["agent.quota"] : labels["agent.quota"]), 10);
+      const q = Number.parseInt((isClaude ? labels["claude.quota"] ?? labels["agent.quota"] : labels["agent.quota"]), 10);
+      if (!Number.isFinite(v) && !Number.isFinite(q)) return [];
       return [[k.address, {
-        pct: Math.max(0, Math.min(100, v)),
+        pct: Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : null,
         model,
         quota: Number.isFinite(q) ? Math.max(0, Math.min(100, q)) : null,
-        effort: (/claude/.test(prog) ? labels["claude.effort"] || labels["agent.effort"] : labels["agent.effort"]) || null,
+        effort: (isClaude ? labels["claude.effort"] || labels["agent.effort"] : labels["agent.effort"]) || null,
       }]];
     }));
     for (const [addr, c] of this.ctxRead) {
       const prev = contextOf.get(addr);
       contextOf.set(addr, {
-        pct: c.pct,
+        pct: c.pct ?? prev?.pct ?? null,
         model: c.model ?? prev?.model ?? null,
-        quota: prev?.quota ?? null,
+        quota: c.quota ?? prev?.quota ?? null,
         effort: prev?.effort ?? null,
       });
     }
