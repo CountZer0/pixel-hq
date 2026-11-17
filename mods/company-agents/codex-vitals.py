@@ -65,11 +65,11 @@ def extract_vitals(fpath, home):
             try:
                 with open(fpath, "r", encoding="utf-8") as f:
                     for line in f:
-                        if not model and '"model":' in line:
+                        if '"model":' in line:
                             try:
                                 d = json.loads(line)
                                 p = d.get("payload") or {}
-                                m = p.get("model") or (p.get("thread_settings") or {}).get("model")
+                                m = p.get("model") or (p.get("thread_settings") or {}).get("model") or ((p.get("state") or {}).get("collaboration_mode") or {}).get("model")
                                 if m and isinstance(m, str):
                                     model = m
                             except Exception:
@@ -105,7 +105,7 @@ def extract_vitals(fpath, home):
         info = (token_ev.get("payload") or {}).get("info") or {}
         used = (info.get("last_token_usage") or {}).get("total_tokens") or (info.get("total_token_usage") or {}).get("total_tokens") or 0
         win = info.get("model_context_window") or 0
-        if win > 0 and used > 0:
+        if win > 0:
             pct = max(0, min(100, round(used * 100 / win)))
 
         rl = (token_ev.get("payload") or {}).get("rate_limits") or {}

@@ -17,7 +17,18 @@ cat << 'EOF' > "$MOCK_BIN/hc"
 #!/bin/sh
 if [ "$1" = "label" ]; then
   shift
-  echo "hc label $@" >> "$MOCK_HC_LOG"
+  term="$1"
+  shift
+  for arg in "$@"; do
+    case "$arg" in
+      *=*) ;;
+      *)
+        echo "error: invalid value '$arg' for '<K=V>...': expected key=value, got \"$arg\"" >&2
+        exit 2
+        ;;
+    esac
+  done
+  echo "hc label $term $@" >> "$MOCK_HC_LOG"
 fi
 exit 0
 EOF
@@ -91,6 +102,18 @@ CLAUDE_STR_MODEL='{"model":"opus","context_window":{"used_percentage":25},"rate_
 test_case "Claude Code String Model" "$CLAUDE_STR_MODEL" \
   "opus · 25% context · 90% 5h left" \
   "agent\.context=25.*agent\.model=opus.*agent\.effort=high"
+
+# Test 6: Live Claude Code payload (null used_percentage, space in model name, rate limits)
+CLAUDE_LIVE_JSON='{"session_id":"5a472f2a","cwd":"/home/nhat/uctalent","effort":{"level":"high"},"model":{"id":"claude-opus-5-5","display_name":"Opus 5.5"},"context_window":{"total_input_tokens":0,"total_output_tokens":0,"context_window_size":1000000,"current_usage":null,"used_percentage":null,"remaining_percentage":null},"rate_limits":{"five_hour":{"used_percentage":0,"resets_at":1794909600}}}'
+test_case "Claude Code Live Payload (Opus 5.5 + null context)" "$CLAUDE_LIVE_JSON" \
+  "Opus 5\.5 · 0% context · 100% 5h left" \
+  "agent\.context=0.*claude\.context=0.*agent\.model=Opus 5\.5.*claude\.model=Opus 5\.5.*agent\.quota=100.*agent\.effort=high"
+
+# Test 7: Live Antigravity payload (Gemini 3.8 Flash (High) with parenthesized effort)
+AGY_LIVE_JSON='{"cwd":"/home/nhat/per","conversation_id":"8542ac38","model":{"id":"Gemini 3.8 Flash (High)","display_name":"Gemini 3.8 Flash (High)","effort":"high"},"context_window":{"total_input_tokens":44922,"total_output_tokens":335298,"context_window_size":1048576,"used_percentage":4.284095764160156},"quota":{"gemini-5h":{"remaining_fraction":0.70575684}}}'
+test_case "Antigravity Live Payload (Gemini 3.8 Flash (High))" "$AGY_LIVE_JSON" \
+  "Gemini 3\.8 Flash \(High\) · 4% context · 71% 5h left" \
+  "agent\.context=4.*agy\.context=4.*agent\.model=Gemini 3\.8 Flash \(High\).*agy\.model=Gemini 3\.8 Flash \(High\).*agent\.quota=71.*agent\.effort=high"
 
 # Clean up
 rm -rf "$MOCK_BIN" "$MOCK_LOG"

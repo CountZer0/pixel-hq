@@ -51,7 +51,7 @@ if not model:
                     except Exception: pass
     except Exception: pass
 
-if not model:
+if not model and d:
     for sp in [os.path.expanduser("~/.claude/settings.json"), os.path.expanduser("~/.gemini/antigravity-cli/settings.json")]:
         try:
             if os.path.exists(sp):
@@ -62,6 +62,13 @@ if not model:
 
 c = (d.get("context_window") if isinstance(d.get("context_window"), dict) else {}) or {}
 p = c.get("used_percentage")
+if p is None:
+    used_in = c.get("total_input_tokens")
+    used_out = c.get("total_output_tokens")
+    size = c.get("context_window_size")
+    if used_in is not None and size:
+        used = (used_in or 0) + (used_out or 0)
+        p = used * 100.0 / size
 if p is None:
     # older Claude Code: estimate from the last assistant message in the transcript
     try:
@@ -96,29 +103,17 @@ elif isinstance(d.get("quota"), dict):
 quota = str(max(0, min(100, q_pct))) if q_pct is not None else ""
 
 eff = d.get("effort") if isinstance(d.get("effort"), dict) else {}
-effort = clean(eff.get("level") or m.get("effort") or "")
+effort = clean(eff.get("level") or (m.get("effort") if isinstance(m, dict) else "") or "")
 print(pct + "|" + model + "|" + quota + "|" + effort)
 ' 2>/dev/null)
 pct=${fields%%\|*}; rest=${fields#*\|}; model=${rest%%\|*}; rest=${rest#*\|}; quota=${rest%%\|*}; effort=${rest#*\|}
 
 if [ -n "$HC_TERMINAL_ID" ] && command -v hc >/dev/null 2>&1; then
-  args=""
-  if [ -n "$pct" ]; then
-    args="agent.context=$pct agent.model=$model claude.context=$pct claude.model=$model"
-  else
-    args="agent.context= agent.model= claude.context= claude.model="
-  fi
-  if [ -n "$quota" ]; then
-    args="$args agent.quota=$quota claude.quota=$quota"
-  else
-    args="$args agent.quota= claude.quota="
-  fi
-  if [ -n "$effort" ]; then
-    args="$args agent.effort=$effort claude.effort=$effort"
-  else
-    args="$args agent.effort= claude.effort="
-  fi
-  hc label "$HC_TERMINAL_ID" $args >/dev/null 2>&1 &
+  hc label "$HC_TERMINAL_ID" \
+    "agent.context=$pct" "claude.context=$pct" "agy.context=$pct" \
+    "agent.model=$model" "claude.model=$model" "agy.model=$model" \
+    "agent.quota=$quota" "claude.quota=$quota" "agy.quota=$quota" \
+    "agent.effort=$effort" "claude.effort=$effort" "agy.effort=$effort" >/dev/null 2>&1 &
 fi
 if [ -n "$pct" ]; then
   if [ -n "$quota" ]; then printf '%s · %s%% context · %s%% 5h left' "$model" "$pct" "$quota"; else printf '%s · %s%% context' "$model" "$pct"; fi

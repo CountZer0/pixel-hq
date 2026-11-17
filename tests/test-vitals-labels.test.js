@@ -28,11 +28,12 @@ async function runTests() {
       const prog = String(k.program?.key ?? k.report?.app ?? k.status?.app ?? k.agent ?? "").toLowerCase();
       const isClaude = /claude/.test(prog);
       const isAgy = /antigravity|agy/.test(prog);
-      const own = isClaude ? labels["claude.context"] ?? labels["agent.context"] : (isAgy ? labels["agy.context"] ?? labels["agent.context"] : labels["agent.context"]);
-      const model = isClaude ? (labels["claude.model"] || labels["agent.model"] || null) : (labels["agent.model"] || labels["agy.model"] || null);
+      const isCodex = /codex/.test(prog);
+      const own = isClaude ? labels["claude.context"] ?? labels["agent.context"] : (isAgy ? labels["agy.context"] ?? labels["agent.context"] : (isCodex ? labels["codex.context"] ?? labels["agent.context"] : labels["agent.context"]));
+      const model = isClaude ? (labels["claude.model"] || labels["agent.model"] || null) : (labels["agent.model"] || labels["agy.model"] || labels["codex.model"] || null);
       const v = Number.parseInt(own, 10);
-      const q = Number.parseInt((isClaude ? labels["claude.quota"] ?? labels["agent.quota"] : (isAgy ? labels["agy.quota"] ?? labels["agent.quota"] : labels["agent.quota"])), 10);
-      if (!Number.isFinite(v) && !Number.isFinite(q)) return [];
+      const q = Number.parseInt((isClaude ? labels["claude.quota"] ?? labels["agent.quota"] : (isAgy ? labels["agy.quota"] ?? labels["agent.quota"] : (isCodex ? labels["codex.quota"] ?? labels["agent.quota"] : labels["agent.quota"]))), 10);
+      if (!Number.isFinite(v) && !Number.isFinite(q) && !model) return [];
       return [[k.address, {
         pct: Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : null,
         model,
@@ -42,14 +43,17 @@ async function runTests() {
     }));
   }
 
+  const modelOf = (ctx) => (ctx.model ? [ctx.model, ctx.effort].filter(Boolean).join(" · ") : ctx.effort ? `effort ${ctx.effort}` : "");
+
   const terminals = [
     {
       address: "t_claude",
       program: { key: "claude" },
       labels: {
-        "claude.context": "55",
-        "claude.model": "Opus 4",
-        "claude.quota": "70",
+        "claude.context": "0",
+        "claude.model": "Opus 5.5",
+        "claude.quota": "100",
+        "claude.effort": "high",
       },
     },
     {
@@ -67,23 +71,42 @@ async function runTests() {
         "agent.context": "7",
         "agent.model": "Gemini 3.8 Flash (High)",
         "agent.quota": "96",
+        "agent.effort": "high",
+      },
+    },
+    {
+      address: "buuuu/t_codex",
+      program: { key: "codex" },
+      labels: {
+        "codex.context": "8",
+        "codex.model": "gpt-6-luna",
+        "codex.quota": "100",
       },
     },
   ];
 
   const parsed = parseContext(terminals);
-  assert.strictEqual(parsed.get("t_claude")?.pct, 55);
-  assert.strictEqual(parsed.get("t_claude")?.model, "Opus 4");
-  assert.strictEqual(parsed.get("t_claude")?.quota, 70);
+  assert.strictEqual(parsed.get("t_claude")?.pct, 0);
+  assert.strictEqual(parsed.get("t_claude")?.model, "Opus 5.5");
+  assert.strictEqual(parsed.get("t_claude")?.quota, 100);
+  assert.strictEqual(parsed.get("t_claude")?.effort, "high");
+  assert.strictEqual(modelOf(parsed.get("t_claude")), "Opus 5.5 · high");
 
   assert.strictEqual(parsed.get("t_opencode")?.pct, 22);
   assert.strictEqual(parsed.get("t_opencode")?.model, "inkling-2-small-free");
+  assert.strictEqual(modelOf(parsed.get("t_opencode")), "inkling-2-small-free");
 
   assert.strictEqual(parsed.get("t_agy")?.pct, 7);
   assert.strictEqual(parsed.get("t_agy")?.model, "Gemini 3.8 Flash (High)");
   assert.strictEqual(parsed.get("t_agy")?.quota, 96);
+  assert.strictEqual(modelOf(parsed.get("t_agy")), "Gemini 3.8 Flash (High) · high");
 
-  console.log("PASS: contextOf parsing handles Claude, OpenCode, and Antigravity vitals");
+  assert.strictEqual(parsed.get("buuuu/t_codex")?.pct, 8);
+  assert.strictEqual(parsed.get("buuuu/t_codex")?.model, "gpt-6-luna");
+  assert.strictEqual(parsed.get("buuuu/t_codex")?.quota, 100);
+  assert.strictEqual(modelOf(parsed.get("buuuu/t_codex")), "gpt-6-luna");
+
+  console.log("PASS: contextOf parsing handles Claude, OpenCode, Antigravity, and Codex vitals and model rendering");
 
   console.log("All Vitals & Labels tests passed!");
 }

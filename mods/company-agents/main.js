@@ -97,7 +97,36 @@ function vitalsBars(t, ctx, id, width) {
 // platform (the former lsof-based path needed sh and Unix).
 const homeDir = () => process.env.HOME ?? process.env.USERPROFILE ?? "";
 const agyHome = () => process.env.AGY_HOME ?? `${homeDir()}/.gemini/antigravity-cli`;
-const progOf = (a) => String(a?.program?.key ?? a?.program?.name ?? a?.agent ?? a?.report?.app ?? a?.status?.app ?? a?.app ?? a?.name ?? a?.title ?? "");
+const progOf = (a) => {
+  const fg = a?.foreground;
+  const fgArgv = Array.isArray(fg?.argv) ? fg.argv.join(" ") : "";
+  const argv = Array.isArray(a?.argv) ? a.argv.join(" ") : "";
+  const pool = [
+    a?.program?.key,
+    a?.program?.name,
+    a?.agent,
+    a?.report?.app,
+    a?.status?.app,
+    a?.app,
+    fg?.name,
+    a?.name,
+    a?.title,
+    fgArgv,
+    argv,
+    a?.labels?.["codex.model"] ? "codex" : null,
+    a?.labels?.["claude.model"] ? "claude" : null,
+    a?.labels?.["agy.model"] ? "antigravity" : null,
+  ];
+  for (const item of pool) {
+    if (!item) continue;
+    const s = String(item).toLowerCase();
+    if (/claude/.test(s)) return "claude";
+    if (/antigravity|agy/.test(s)) return "antigravity";
+    if (/opencode/.test(s)) return "opencode";
+    if (/codex/.test(s)) return "codex";
+  }
+  return String(a?.program?.key ?? a?.program?.name ?? a?.agent ?? fg?.name ?? a?.name ?? a?.title ?? "");
+};
 
 const CODEX_VITALS_PY = `import glob, json, os, subprocess, sys, time
 pid_str = sys.argv[1].strip() if len(sys.argv) > 1 else ""
@@ -140,11 +169,11 @@ if fpath and os.path.isfile(fpath):
     try:
       with open(fpath, "r", encoding="utf-8") as f:
         for line in f:
-          if not model and '"model":' in line:
+          if '"model":' in line:
             try:
               d = json.loads(line)
               p = d.get("payload") or {}
-              m = p.get("model") or (p.get("thread_settings") or {}).get("model")
+              m = p.get("model") or (p.get("thread_settings") or {}).get("model") or ((p.get("state") or {}).get("collaboration_mode") or {}).get("model")
               if m and isinstance(m, str): model = m
             except Exception: pass
           if '"type":"token_count"' in line:
@@ -169,7 +198,7 @@ if token_ev:
   info = (token_ev.get("payload") or {}).get("info") or {}
   used = (info.get("last_token_usage") or {}).get("total_tokens") or (info.get("total_token_usage") or {}).get("total_tokens") or 0
   win = info.get("model_context_window") or 0
-  if win > 0 and used > 0:
+  if win > 0:
     pct = max(0, min(100, round(used * 100 / win)))
   rl = (token_ev.get("payload") or {}).get("rate_limits") or {}
   primary = rl.get("primary") or {}
@@ -637,13 +666,15 @@ export default class Agents extends View {
         if (/codex/.test(s)) codexTargets.add(x.address);
       }
       const next = new Map();
+      const cleanAddr = (addr) => (typeof addr === "string" && addr.includes("/") ? addr.split("/").pop() : addr);
       for (const addr of codexTargets) {
         try {
           const a = agents().find((x) => x.address === addr);
           const t = termMap.get(addr);
           const sp = spaces().find((s) => s.id === (a?.space ?? t?.labels?.["herdr.space"]));
           const machine = sp?.machine;
-          const info = JSON.parse((await hc(["get", addr, "--json"]).catch(() => ({ stdout: "{}" }))).stdout || "{}");
+          const targetAddr = cleanAddr(addr);
+          const info = JSON.parse((await hc(["get", targetAddr, "--json"]).catch(() => ({ stdout: "{}" }))).stdout || "{}");
           const pid = info?.foreground?.pid;
           const cwd = info?.foreground?.cwd || info?.cwd || (a?.pane ? paneBy.get(a.pane)?.cwd : null);
           const candidates = window()?.platform === "windows" && !machine ? ["python", "python3", "py"] : ["python3", "python"];
@@ -653,7 +684,10 @@ export default class Agents extends View {
             const ev = r.code === 0 && r.stdout ? JSON.parse(r.stdout.trim().split("\n").pop()) : null;
             if (ev && (ev.pct != null || ev.model || ev.quota != null)) {
               next.set(addr, { pct: ev.pct ?? null, model: ev.model ?? "codex", quota: ev.quota ?? null });
-              hc(["label", addr,
+              if (targetAddr !== addr) {
+                next.set(targetAddr, { pct: ev.pct ?? null, model: ev.model ?? "codex", quota: ev.quota ?? null });
+              }
+              hc(["label", targetAddr,
                 `agent.context=${ev.pct ?? ""}`,
                 `codex.context=${ev.pct ?? ""}`,
                 `agent.model=${ev.model ?? ""}`,
@@ -677,6 +711,18 @@ export default class Agents extends View {
           const vitals = await agyTranscriptVitals(cwd, machine);
           if (!vitals && quota == null) continue;
           next.set(a.address, { pct: vitals?.pct ?? null, model: vitals?.model ?? "agy", quota });
+          const targetAddr = cleanAddr(a.address);
+          if (targetAddr !== a.address) {
+            next.set(targetAddr, { pct: vitals?.pct ?? null, model: vitals?.model ?? "agy", quota });
+          }
+          hc(["label", targetAddr,
+            `agent.context=${vitals?.pct ?? ""}`,
+            `agy.context=${vitals?.pct ?? ""}`,
+            `agent.model=${vitals?.model ?? ""}`,
+            `agy.model=${vitals?.model ?? ""}`,
+            `agent.quota=${quota ?? ""}`,
+            `agy.quota=${quota ?? ""}`,
+          ]).catch(() => null);
         } catch {
           continue;
         }
@@ -773,7 +819,8 @@ export default class Agents extends View {
     if (a.status === "working" || a.status === "blocked") { this.hint = { addr: a.address, text: a.status === "working" ? "busy: wait for it" : "answer it first", until: now + 3000 }; cx.notify(); return; }
     if (this.hint?.armed && this.hint.addr === a.address && now < this.hint.until) {
       this.hint = { addr: a.address, text: "compacting...", until: now + 8000 };
-      hc(["send", a.address, "/compact"]).catch(() => null);
+      const targetAddr = typeof a.address === "string" && a.address.includes("/") ? a.address.split("/").pop() : a.address;
+      hc(["send", targetAddr, "/compact"]).catch(() => null);
     } else this.hint = { addr: a.address, text: "click the papers again to /compact", armed: true, until: now + 6000 };
     cx.notify();
   }
