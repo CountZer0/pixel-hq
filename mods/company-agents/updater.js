@@ -80,10 +80,12 @@ export class Updater {
     cx.notify();
 
     try {
+      let targetSha = "main";
       const treeRes = await fetch("https://api.github.com/repos/bnhan2710/pixel-hq/git/trees/main?recursive=1").catch(() => null);
       let fileList = [];
       if (treeRes && treeRes.ok) {
         const treeData = await treeRes.json().catch(() => null);
+        if (treeData?.sha) targetSha = treeData.sha;
         if (Array.isArray(treeData?.tree)) {
           fileList = treeData.tree
             .filter((f) => f.type === "blob" && (f.path.startsWith("layouts/") || f.path.startsWith("mods/") || f.path.startsWith("themes/")) && !f.path.endsWith("README.md") && !f.path.endsWith(".png"))
@@ -117,7 +119,7 @@ export class Updater {
         this.message = `[${i + 1}/${fileList.length}] Downloading ${p}...`;
         cx.notify();
 
-        const url = `https://raw.githubusercontent.com/bnhan2710/pixel-hq/main/${p}?t=${Date.now()}`;
+        const url = `https://raw.githubusercontent.com/bnhan2710/pixel-hq/${targetSha}/${p}?t=${Date.now()}`;
         const res = await fetch(url);
         if (res.status === 404) continue;
         if (!res.ok) throw new Error(`HTTP ${res.status} while fetching ${p}`);

@@ -54,9 +54,24 @@ export async function checkPixelHqUpdate(notifyUser = true) {
     } catch {
       mine = { version: "1.0.0" };
     }
-    const res = await fetch(`https://raw.githubusercontent.com/bnhan2710/pixel-hq/main/mods/company-agents/version.json?t=${Date.now()}`);
-    if (!res.ok) return null;
-    const latest = await res.json();
+    let latest = null;
+    try {
+      const commitRes = await fetch("https://api.github.com/repos/bnhan2710/pixel-hq/commits/main").catch(() => null);
+      if (commitRes && commitRes.ok) {
+        const commitData = await commitRes.json().catch(() => null);
+        const sha = commitData?.sha;
+        if (sha) {
+          const rawShaRes = await fetch(`https://raw.githubusercontent.com/bnhan2710/pixel-hq/${sha}/mods/company-agents/version.json`);
+          if (rawShaRes.ok) latest = await rawShaRes.json().catch(() => null);
+        }
+      }
+    } catch {}
+
+    if (!latest?.version) {
+      const res = await fetch(`https://raw.githubusercontent.com/bnhan2710/pixel-hq/main/mods/company-agents/version.json?t=${Date.now()}`);
+      if (!res.ok) return null;
+      latest = await res.json().catch(() => null);
+    }
     if (!latest?.version) return null;
 
     const num = (v) => String(v).split(".").map((n) => parseInt(n, 10) || 0);
@@ -115,10 +130,12 @@ export async function executePixelHqUpdate() {
   });
 
   try {
+    let targetSha = "main";
     const treeRes = await fetch("https://api.github.com/repos/bnhan2710/pixel-hq/git/trees/main?recursive=1").catch(() => null);
     let fileList = [];
     if (treeRes && treeRes.ok) {
       const treeData = await treeRes.json().catch(() => null);
+      if (treeData?.sha) targetSha = treeData.sha;
       if (Array.isArray(treeData?.tree)) {
         fileList = treeData.tree
           .filter((f) => f.type === "blob" && (f.path.startsWith("layouts/") || f.path.startsWith("mods/") || f.path.startsWith("themes/")) && !f.path.endsWith("README.md") && !f.path.endsWith(".png"))
@@ -145,7 +162,7 @@ export async function executePixelHqUpdate() {
     let newVersion = "latest";
 
     for (const p of fileList) {
-      const url = `https://raw.githubusercontent.com/bnhan2710/pixel-hq/main/${p}?t=${Date.now()}`;
+      const url = `https://raw.githubusercontent.com/bnhan2710/pixel-hq/${targetSha}/${p}?t=${Date.now()}`;
       const res = await fetch(url);
       if (res.status === 404) continue;
       if (!res.ok) throw new Error(`HTTP ${res.status} while fetching ${p}`);
