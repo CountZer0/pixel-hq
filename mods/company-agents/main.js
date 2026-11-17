@@ -719,21 +719,54 @@ export default class Agents extends View {
     const src = `${appHome()}/mods/company-agents/claude-statusline.sh`;
     const sh = 'SRC="$1"; D="$HOME/.claude"; [ -d "$D" ] || exit 3; T="$D/pixel-hq-statusline.sh"; '
       + 'cp "$SRC" "$T" && chmod +x "$T" || exit 1; '
-      + 'python3 -c \'import json, os; p = os.path.expanduser("~/.claude/settings.json"); '
-      + 'd = json.load(open(p)) if os.path.exists(p) else {}; '
-      + 'cur = d.get("statusLine"); '
+      + 'python3 -c \'import json, os, sys, time; p = os.path.expanduser("~/.claude/settings.json"); '
       + 'cmd = "sh " + os.path.expanduser("~/.claude/pixel-hq-statusline.sh"); '
-      + 'if not cur or "pixel-hq" in str(cur) or "claude-statusline" in str(cur): '
+      + 'd = None; '
+      + 'if os.path.exists(p): '
+      + '  for _ in range(5): '
+      + '    try: '
+      + '      with open(p, "r", encoding="utf-8") as f: d = json.load(f); '
+      + '      break; '
+      + '    except Exception: time.sleep(0.2); '
+      + '  if d is None: sys.exit(1); '
+      + 'else: d = {}; '
+      + 'cur = d.get("statusLine"); '
+      + 'cur_cmd = cur.get("command") if isinstance(cur, dict) else str(cur or ""); '
+      + 'if cur_cmd == cmd: sys.exit(0); '
+      + 'if not cur or "pixel-hq" in cur_cmd or "claude-statusline" in cur_cmd: '
       + '  d["statusLine"] = {"type": "command", "command": cmd}; '
-      + '  json.dump(d, open(p, "w"), indent=2)\' 2>/dev/null || exit 1; exit 0';
+      + '  tmp = f"{p}.tmp.{os.getpid()}"; '
+      + '  try: '
+      + '    with open(tmp, "w", encoding="utf-8") as f: '
+      + '      json.dump(d, f, indent=2); f.flush(); os.fsync(f.fileno()); '
+      + '    os.replace(tmp, p); '
+      + '  except Exception: '
+      + '    if os.path.exists(tmp): '
+      + '      try: os.remove(tmp) '
+      + '      except Exception: pass; '
+      + '    sys.exit(1); '
+      + 'sys.exit(0)\' 2>/dev/null || exit 1; exit 0';
     const ps = "param($src); $d = Join-Path $env:USERPROFILE '.claude'; if (-not (Test-Path -LiteralPath $d)) { exit 3 }; "
       + "$t = Join-Path $d 'pixel-hq-statusline.sh'; Copy-Item -LiteralPath $src -Destination $t -Force; "
-      + "$cfg = Join-Path $d 'settings.json'; $obj = if (Test-Path -LiteralPath $cfg) { Get-Content -Raw -LiteralPath $cfg | ConvertFrom-Json } else { [pscustomobject]@{} }; "
+      + "$cfg = Join-Path $d 'settings.json'; $cmd = 'sh ' + ($t -replace '\\\\', '/'); "
+      + "$obj = $null; "
+      + "if (Test-Path -LiteralPath $cfg) { "
+      + "  for ($i = 0; $i -lt 5; $i++) { "
+      + "    try { $raw = Get-Content -Raw -LiteralPath $cfg -ErrorAction Stop; "
+      + "      $obj = if ($raw.Trim().Length -gt 0) { $raw | ConvertFrom-Json -ErrorAction Stop } else { [pscustomobject]@{} }; break; "
+      + "    } catch { Start-Sleep -Milliseconds 200 } "
+      + "  }; if ($null -eq $obj) { exit 1 } "
+      + "} else { $obj = [pscustomobject]@{} }; "
       + "$cur = if ($obj.statusLine) { $obj.statusLine.command } else { '' }; "
+      + "if ($cur -eq $cmd) { exit 0 }; "
       + "if (-not $cur -or $cur -match 'pixel-hq' -or $cur -match 'claude-statusline') { "
-      + "  $cmd = 'sh ' + ($t -replace '\\\\', '/'); "
       + "  if (-not $obj.statusLine) { $obj | Add-Member -NotePropertyName statusLine -NotePropertyValue ([pscustomobject]@{ type='command'; command=$cmd }) } else { $obj.statusLine.command = $cmd }; "
-      + "  $obj | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $cfg }";
+      + "  $tmp = \"$cfg.tmp.$PID\"; $json = $obj | ConvertTo-Json -Depth 10; "
+      + "  for ($i = 0; $i -lt 5; $i++) { "
+      + "    try { [System.IO.File]::WriteAllText($tmp, $json, [System.Text.Encoding]::UTF8); Move-Item -LiteralPath $tmp -Destination $cfg -Force -ErrorAction Stop; break } "
+      + "    catch { Start-Sleep -Milliseconds 200 } "
+      + "  } "
+      + "}";
     const machines = [undefined, ...new Set(spaces().map((s) => s.machine).filter(Boolean))];
     for (const on of machines) {
       const isWin = !on && window()?.platform === "windows";
@@ -749,21 +782,56 @@ export default class Agents extends View {
     const src = `${appHome()}/mods/company-agents/claude-statusline.sh`;
     const sh = 'SRC="$1"; D="$HOME/.gemini/antigravity-cli"; [ -d "$D" ] || exit 3; T="$D/pixel-hq-statusline.sh"; '
       + 'cp "$SRC" "$T" && chmod +x "$T" || exit 1; '
-      + 'python3 -c \'import json, os; p = os.path.expanduser("~/.gemini/antigravity-cli/settings.json"); '
-      + 'd = json.load(open(p)) if os.path.exists(p) else {}; '
-      + 'cur = d.get("statusLine"); '
+      + 'python3 -c \'import json, os, sys, time; p = os.path.expanduser("~/.gemini/antigravity-cli/settings.json"); '
       + 'cmd = "sh " + os.path.expanduser("~/.gemini/antigravity-cli/pixel-hq-statusline.sh"); '
-      + 'if not cur or "pixel-hq" in str(cur) or "statusline-probe" in str(cur) or "claude-statusline" in str(cur): '
+      + 'd = None; '
+      + 'if os.path.exists(p): '
+      + '  for _ in range(5): '
+      + '    try: '
+      + '      with open(p, "r", encoding="utf-8") as f: d = json.load(f); '
+      + '      break; '
+      + '    except Exception: time.sleep(0.2); '
+      + '  if d is None: sys.exit(1); '
+      + 'else: d = {}; '
+      + 'cur = d.get("statusLine"); '
+      + 'cur_cmd = cur.get("command") if isinstance(cur, dict) else str(cur or ""); '
+      + 'cur_en = cur.get("enabled", True) if isinstance(cur, dict) else True; '
+      + 'if cur_cmd == cmd and cur_en is True: sys.exit(0); '
+      + 'if not cur or "pixel-hq" in cur_cmd or "statusline-probe" in cur_cmd or "claude-statusline" in cur_cmd: '
       + '  d["statusLine"] = {"type": "command", "command": cmd, "enabled": True}; '
-      + '  json.dump(d, open(p, "w"), indent=2)\' 2>/dev/null || exit 1; exit 0';
+      + '  tmp = f"{p}.tmp.{os.getpid()}"; '
+      + '  try: '
+      + '    with open(tmp, "w", encoding="utf-8") as f: '
+      + '      json.dump(d, f, indent=2); f.flush(); os.fsync(f.fileno()); '
+      + '    os.replace(tmp, p); '
+      + '  except Exception: '
+      + '    if os.path.exists(tmp): '
+      + '      try: os.remove(tmp) '
+      + '      except Exception: pass; '
+      + '    sys.exit(1); '
+      + 'sys.exit(0)\' 2>/dev/null || exit 1; exit 0';
     const ps = "param($src); $d = Join-Path $env:USERPROFILE '.gemini\\antigravity-cli'; if (-not (Test-Path -LiteralPath $d)) { exit 3 }; "
       + "$t = Join-Path $d 'pixel-hq-statusline.sh'; Copy-Item -LiteralPath $src -Destination $t -Force; "
-      + "$cfg = Join-Path $d 'settings.json'; $obj = if (Test-Path -LiteralPath $cfg) { Get-Content -Raw -LiteralPath $cfg | ConvertFrom-Json } else { [pscustomobject]@{} }; "
+      + "$cfg = Join-Path $d 'settings.json'; $cmd = 'sh ' + ($t -replace '\\\\', '/'); "
+      + "$obj = $null; "
+      + "if (Test-Path -LiteralPath $cfg) { "
+      + "  for ($i = 0; $i -lt 5; $i++) { "
+      + "    try { $raw = Get-Content -Raw -LiteralPath $cfg -ErrorAction Stop; "
+      + "      $obj = if ($raw.Trim().Length -gt 0) { $raw | ConvertFrom-Json -ErrorAction Stop } else { [pscustomobject]@{} }; break; "
+      + "    } catch { Start-Sleep -Milliseconds 200 } "
+      + "  }; if ($null -eq $obj) { exit 1 } "
+      + "} else { $obj = [pscustomobject]@{} }; "
       + "$cur = if ($obj.statusLine) { $obj.statusLine.command } else { '' }; "
+      + "$en = if ($obj.statusLine -and ($obj.statusLine | Get-Member -Name enabled)) { $obj.statusLine.enabled } else { $true }; "
+      + "if ($cur -eq $cmd -and $en -eq $true) { exit 0 }; "
       + "if (-not $cur -or $cur -match 'pixel-hq' -or $cur -match 'claude-statusline' -or $cur -match 'statusline-probe') { "
-      + "  $cmd = 'sh ' + ($t -replace '\\\\', '/'); "
       + "  if (-not $obj.statusLine) { $obj | Add-Member -NotePropertyName statusLine -NotePropertyValue ([pscustomobject]@{ type='command'; command=$cmd; enabled=$true }) } else { $obj.statusLine.command = $cmd; $obj.statusLine.enabled = $true }; "
-      + "  $obj | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $cfg }";
+      + "  $tmp = \"$cfg.tmp.$PID\"; $json = $obj | ConvertTo-Json -Depth 10; "
+      + "  for ($i = 0; $i -lt 5; $i++) { "
+      + "    try { [System.IO.File]::WriteAllText($tmp, $json, [System.Text.Encoding]::UTF8); Move-Item -LiteralPath $tmp -Destination $cfg -Force -ErrorAction Stop; break } "
+      + "    catch { Start-Sleep -Milliseconds 200 } "
+      + "  } "
+      + "}";
     const machines = [undefined, ...new Set(spaces().map((s) => s.machine).filter(Boolean))];
     for (const on of machines) {
       const isWin = !on && window()?.platform === "windows";
