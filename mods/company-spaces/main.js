@@ -22,6 +22,11 @@ const narrow = () => (find(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
 // Where a space is now: its first terminal's live folder, else where it was made.
 // `ps`: panes(), read once by the caller (each read copies every pane).
 function place(s, ps) {
+  const activeTabId = (s.tabs ?? []).find((c) => c.active)?.id;
+  if (activeTabId) {
+    const activeCwd = ps.find((p) => p.tab === activeTabId && p.cwd)?.cwd;
+    if (activeCwd) return activeCwd;
+  }
   const tabs = new Set((s.tabs ?? []).map((c) => c.id));
   return ps.find((p) => tabs.has(p.tab) && p.cwd)?.cwd || s.folder;
 }
@@ -562,8 +567,12 @@ export default class Spaces extends View {
       }));
     // The room sits in a notched frame in the space's own color.
     const tile = div().relative().w(60).h(46).flex_none().children(pix(soften(fill), 60, 46)).child(div().absolute().left(3).top(3).child(room));
-    const raw = g?.branch ?? null;
-    const place = raw ?? base(w.folder ?? "");
+    const activeTab = (w.tabs ?? []).find((t) => t.active) ?? w.tabs?.[0];
+    const ps = panes();
+    const leadPane = ps.find((p) => p.tab === activeTab?.id && p.terminal) ?? ps.find((p) => (w.tabs ?? []).some((t) => t.id === p.tab) && p.terminal);
+    const raw = (g?.branch && g.branch !== "(detached)") ? g.branch : (w.branch || leadPane?.branch || (g?.branch === "(detached)" ? "detached" : null));
+    const repoName = g?.name || (leadPane?.cwd ? base(leadPane.cwd) : null);
+    const branchLabel = raw ? (repoName && repoName.toLowerCase() !== w.name.toLowerCase() && repoName.toLowerCase() !== raw.toLowerCase() ? `${repoName} · ${raw}` : raw) : null;
     const done = count("done");
     const idle = crew.length - blocked - working - done;
     const dot = blocked > 0 ? "#f38ba8" : working > 0 ? "#89b4fa" : null;
@@ -579,7 +588,7 @@ export default class Spaces extends View {
       ...(done > 0 ? [chip(`${done} shipped`, "#a6e3a1")] : []),
       ...(idle > 0 ? [chip(`${idle} break`, "#9399b2")] : []),
     ];
-    const glyph = div().relative().w(8).h(10).flex_none().children([[0, 0, 2, 2], [0, 8, 2, 2], [5, 2, 2, 2], [0, 2, 1, 6], [1, 4, 5, 1]].map(([x, y, w2, h2]) => div().absolute().left(x).top(y).w(w2).h(h2).bg(raw ? "#89b4fa" : t.dim)));
+    const glyph = div().relative().w(8).h(10).flex_none().children([[0, 0, 2, 2], [0, 8, 2, 2], [5, 2, 2, 2], [0, 2, 1, 6], [1, 4, 5, 1]].map(([x, y, w2, h2]) => div().absolute().left(x).top(y).w(w2).h(h2).bg("#89b4fa")));
     return h_flex().size_full().gap(11).items_center().px(4)
       .child(tile)
       .child(v_flex().flex_1().min_w(0).gap(3)
@@ -590,11 +599,14 @@ export default class Spaces extends View {
             return el.child(blocked > 0 ? d.loop("opacity", { from: 0.3, to: 1, period: 800, easing: "ease-in-out" }) : d);
           }))
         .child(h_flex().gap(5).items_center().text_size(10.5).font_family(MONO).text_color(t.dim)
-          .child(glyph)
-          .child(div().min_w(0).truncate().text_color(raw ? "#89b4fa" : t.dim).child(place))
-          .child(div().flex_none().child(`\u00b7 ${crew.length ? `${crew.length} aboard` : "no service"}`))
-          .when(g?.ahead > 0, (el) => el.child(div().flex_none().text_color(t.ansi2).child(`\u2191${g.ahead}`)))
-          .when(g?.behind > 0, (el) => el.child(div().flex_none().text_color(t.ansi1).child(`\u2193${g.behind}`))))
+          .when(Boolean(branchLabel), (el) => el
+            .child(glyph)
+            .child(div().min_w(0).truncate().text_color("#89b4fa").child(branchLabel))
+            .child(div().flex_none().child("·"))
+          )
+          .child(div().flex_none().child(crew.length ? `${crew.length} aboard` : "no service"))
+          .when(g?.ahead > 0, (el) => el.child(div().flex_none().text_color(t.ansi2).child(`↑${g.ahead}`)))
+          .when(g?.behind > 0, (el) => el.child(div().flex_none().text_color(t.ansi1).child(`↓${g.behind}`))))
         .child(h_flex().gap(4).items_center().min_w(0).overflow_hidden().tooltip(`${working} typing · ${blocked} need you · ${done} shipped · ${idle} on break`).children(chips.length ? chips : [div().text_size(10).font_family(MONO).text_color(t.dim).child("dark floor")])));
   }
 

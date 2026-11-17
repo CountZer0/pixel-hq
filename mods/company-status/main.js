@@ -1,6 +1,6 @@
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, agents, theme, run, window, keys, setBadge, openOverlay, shared } from "herdr";
+import { spaces, panes, focused, agents, theme, run, window, keys, setBadge, openOverlay, shared } from "herdr";
 
 export default class WorkspaceStatus extends View {
   // The palette key as actually bound, not a hardcoded one; without a
@@ -17,6 +17,9 @@ export default class WorkspaceStatus extends View {
   render() {
     const t = theme();
     const space = spaces().find(s => s.active);
+    const activeTab = (space?.tabs ?? []).find(t => t.active) ?? space?.tabs?.[0];
+    const leadPane = panes().find(p => p.tab === activeTab?.id && p.terminal) ?? focused();
+    const currentBranch = space?.branch || leadPane?.branch;
     const list = agents();
     const n = (k) => list.filter(a => a.status === k).length;
     const wants = n("blocked") > 0 ? String(n("blocked")) : null;
@@ -29,7 +32,7 @@ export default class WorkspaceStatus extends View {
     return h_flex().size_full().px(14).gap(16).items_center().bg(t.chrome).border_t(1).border_color(t.border).text_size(11.8).text_color(t.muted)
       .child(div().font_semibold().text_color("#b4befe").child("Pixel HQ"))
       .child(label(space?.machine ? "server" : "monitor", space?.machine ?? "This computer"))
-      .when(Boolean(space?.branch), el => el.child(label("branch", space.branch)))
+      .when(Boolean(currentBranch), el => el.child(label("branch", currentBranch)))
       .child(div().text_color(t.dim).child(`${list.length} on the team`))
       .when(Boolean(shared("pixel-hq.updating")), (el) => el.child(
         h_flex().id("update-status-pill").gap(6).items_center().px(7).py(2).rounded(6)
