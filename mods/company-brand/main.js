@@ -65,7 +65,8 @@ export default class WorkspaceChrome extends View {
         .child(row("machine", "plus", "Add machine", true, () => run("mod.open", { name: "machine-add" })))
         .when(Boolean(upd), el => {
           const urgent = Boolean(upd?.isUrgent);
-          const label = urgent ? `⚠️ Urgent Update (v${upd.version})` : `Update Pixel HQ (v${upd.version})`;
+          const verText = upd?.versionLabel ?? `v${upd.version}`;
+          const label = urgent ? `⚠️ Urgent Update (${verText})` : `Update Pixel HQ (${verText})`;
           const color = urgent ? (t.blocked ?? "#f38ba8") : t.accent;
           return el.child(
             row("update-hq", "sparkles", label, false, async () => {
@@ -84,8 +85,9 @@ export default class WorkspaceChrome extends View {
           .child(div().text_size(10).text_color(t.dim).child("engineering floor")))))
       .when(Boolean(upd && !collapsed), el => {
         const urgent = Boolean(upd?.isUrgent);
+        const verText = upd?.versionLabel ?? `v${upd.version}`;
         const color = urgent ? (t.blocked ?? "#f38ba8") : t.accent;
-        const tip = urgent ? `⚠️ Urgent update: Pixel HQ v${upd.version}` : `Update Pixel HQ to v${upd.version}`;
+        const tip = urgent ? `⚠️ Urgent update: Pixel HQ ${verText}` : `Update Pixel HQ to ${verText}`;
         return el.child(
           this.button("update-btn", svg("mods/company-brand/sparkles.svg").size(15), async () => {
             await executePixelHqUpdate();

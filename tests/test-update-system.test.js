@@ -52,13 +52,14 @@ async function runTests() {
   assert.ok(brandSrc.includes('c === "update"'), "company-brand must listen to nextCommand for update");
   console.log("PASS: Position 1 verified in company-brand (footer row & header button with urgency-aware labels and styling)");
 
-  // 4. Verify Position 2: company-status bottom status bar pill is clear (not confused with current version)
+  // 4. Verify Position 2: company-status bottom status bar pill is clear and shows old -> new version transition
   assert.ok(statusSrc.includes('id("update-status-pill")'), "company-status must include update-status-pill");
   assert.ok(!statusSrc.includes('`🚀 v${upd.version}`'), "company-status must NOT just show raw version like current version");
-  assert.ok(statusSrc.includes("✨ New update: v${upd.version}"), "company-status must clearly show '✨ New update: v...' for normal type");
-  assert.ok(statusSrc.includes("⚠️ Urgent update: v${upd.version}"), "company-status must show '⚠️ Urgent update: v...' for urgent type");
+  assert.ok(statusSrc.includes("✨ New update: ${verText}"), "company-status must clearly show '✨ New update: ${verText}' for normal type");
+  assert.ok(statusSrc.includes("⚠️ Urgent update: ${verText}"), "company-status must show '⚠️ Urgent update: ${verText}' for urgent type");
+  assert.ok(brandUpdaterSrc.includes("v${curVer} → v${newVer}"), "updater must calculate version transition string (v<old> → v<new>)");
   assert.ok(statusSrc.includes('run("company-brand.update")'), "update-status-pill must trigger company-brand.update on click");
-  console.log("PASS: Position 2 verified in company-status (clear 'New update' pill avoiding version confusion and adapting to Type 1/2)");
+  console.log("PASS: Position 2 verified in company-status (clear 'New update' pill showing old -> new transition and adapting to Type 1/2)");
 
   // 5. Verify company-agents office floor banner has been cleanly removed
   assert.ok(!agentsSrc.includes('Pixel HQ ${this.update.version} is out'), "company-agents office floor must not render update banner");
