@@ -342,7 +342,7 @@ export default class Agents extends View {
     this.setupAntigravity(cx);
     this.setupCodex(cx);
     checkPixelHqUpdate(true).then(() => cx.notify()).catch(() => {});
-    cx.timer.every(60000, (cx) => checkPixelHqUpdate(true).then(() => cx.notify()).catch(() => {}));
+    cx.timer.every(6 * 3600 * 1000, (cx) => checkPixelHqUpdate(true).then(() => cx.notify()).catch(() => {}));
     // Now and then (every 14 to 32 s) one idle pet steps out beside its desk for about 3.6 s, then comes back.
     this.out = null;
     this.breakerList = [];
