@@ -1,4 +1,4 @@
 {
-  "version": "1.6.0",
-  "notes": "OpenCode active tab status tracking, Codex vitals with model and quota, Claude and Antigravity auto statusline"
+  "version": "1.6.1",
+  "notes": "Safe atomic settings update with retry, multi-agent busy deferral, and codex vitals integration"
 }
