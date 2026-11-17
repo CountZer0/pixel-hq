@@ -3,13 +3,15 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 async function runTests() {
-  console.log("=== Running Update System Decoupling & Urgency Types Tests ===");
+  console.log("=== Running Update System Background & Pristine Brand Tests ===");
 
   const brandPath = path.resolve(__dirname, "../mods/company-brand/main.js");
   const brandSrc = fs.readFileSync(brandPath, "utf8");
-
   const brandUpdaterPath = path.resolve(__dirname, "../mods/company-brand/updater.js");
-  const brandUpdaterSrc = fs.readFileSync(brandUpdaterPath, "utf8");
+  const brandSparklesPath = path.resolve(__dirname, "../mods/company-brand/sparkles.svg");
+
+  const agentsUpdaterPath = path.resolve(__dirname, "../mods/company-agents/updater.js");
+  const agentsUpdaterSrc = fs.readFileSync(agentsUpdaterPath, "utf8");
 
   const statusPath = path.resolve(__dirname, "../mods/company-status/main.js");
   const statusSrc = fs.readFileSync(statusPath, "utf8");
@@ -17,18 +19,29 @@ async function runTests() {
   const agentsPath = path.resolve(__dirname, "../mods/company-agents/main.js");
   const agentsSrc = fs.readFileSync(agentsPath, "utf8");
 
-  // 1. Verify company-brand has updater logic and toast notification support with urgency levels
-  assert.ok(brandUpdaterSrc.includes("export async function checkPixelHqUpdate"), "updater.js must export checkPixelHqUpdate");
-  assert.ok(brandUpdaterSrc.includes("export async function executePixelHqUpdate"), "updater.js must export executePixelHqUpdate");
-  assert.ok(brandUpdaterSrc.includes("export function isUrgentUpdate"), "updater.js must export isUrgentUpdate helper");
-  assert.ok(brandUpdaterSrc.includes("notify({"), "updater.js must trigger native toast notification");
-  assert.ok(brandUpdaterSrc.includes("timeout: 10000"), "normal toast notification must have 10-second timeout");
-  assert.ok(brandUpdaterSrc.includes("timeout: 30000"), "urgent toast notification must have 30-second timeout");
-  assert.ok(brandUpdaterSrc.includes('level: "warning"'), "urgent toast notification must use warning level");
-  assert.ok(brandUpdaterSrc.includes('level: "info"'), "normal toast notification must use info level");
-  console.log("PASS: company-brand/updater.js exports check and execute functions with type 1 (urgent) and type 2 (normal) toasts");
+  // 1. Verify company-brand is 100% restored to pristine original state without updater logic
+  assert.ok(!fs.existsSync(brandUpdaterPath), "company-brand/updater.js must NOT exist");
+  assert.ok(!fs.existsSync(brandSparklesPath), "company-brand/sparkles.svg must NOT exist");
+  assert.ok(!brandSrc.includes("updater"), "company-brand/main.js must not import updater");
+  assert.ok(!brandSrc.includes("sparkles"), "company-brand/main.js must not reference sparkles");
+  assert.ok(!brandSrc.includes("checkPixelHqUpdate"), "company-brand/main.js must not check updates");
+  console.log("PASS: company-brand is 100% pristine and free of updater logic");
 
-  // 2. Verify isUrgentUpdate classification
+  // 2. Verify company-agents/updater.js exports check and direct execute functions without modal
+  assert.ok(agentsUpdaterSrc.includes("export async function checkPixelHqUpdate"), "updater.js must export checkPixelHqUpdate");
+  assert.ok(agentsUpdaterSrc.includes("export async function executePixelHqUpdate"), "updater.js must export executePixelHqUpdate");
+  assert.ok(agentsUpdaterSrc.includes("export function isUrgentUpdate"), "updater.js must export isUrgentUpdate helper");
+  assert.ok(agentsUpdaterSrc.includes("notify({"), "updater.js must trigger native toast notification");
+  assert.ok(agentsUpdaterSrc.includes("timeout: 10000"), "normal toast notification must have 10-second timeout");
+  assert.ok(agentsUpdaterSrc.includes("timeout: 30000"), "urgent toast notification must have 30-second timeout");
+  assert.ok(agentsUpdaterSrc.includes('level: "warning"'), "urgent toast notification must use warning level");
+  assert.ok(agentsUpdaterSrc.includes('level: "info"'), "normal toast notification must use info level");
+  assert.ok(agentsUpdaterSrc.includes("Pixel-HQ-Updater"), "GitHub API fetch must include User-Agent header");
+  assert.ok(agentsUpdaterSrc.includes("Updating Pixel HQ..."), "updater must notify updating in background");
+  assert.ok(agentsUpdaterSrc.includes("Pixel HQ updated!"), "updater must notify updated on completion");
+  console.log("PASS: company-agents/updater.js exports background check & execute without modal or progress window");
+
+  // 3. Verify isUrgentUpdate classification
   function testIsUrgent(type) {
     const t = String(type ?? "").toLowerCase().trim();
     return t === "critical" || t === "urgent" || t === "important" || t === "hotfix" || t === "1" || t === "major";
@@ -43,30 +56,24 @@ async function runTests() {
   assert.strictEqual(testIsUrgent("routine"), false, "routine must be false");
   assert.strictEqual(testIsUrgent("2"), false, "type 2 string must be false");
   assert.strictEqual(testIsUrgent(undefined), false, "default undefined must be false");
-  console.log("PASS: isUrgentUpdate correctly distinguishes Type 1 (urgent/critical) from Type 2 (normal/routine)");
+  console.log("PASS: isUrgentUpdate correctly distinguishes Type 1 from Type 2");
 
-  // 3. Verify Position 1: company-brand footer & header indicators adapt to urgency
-  assert.ok(brandSrc.includes("checkPixelHqUpdate(true)"), "company-brand must check for updates on startup");
-  assert.ok(brandSrc.includes('row("update-hq"'), "company-brand footer must include Update Pixel HQ row");
-  assert.ok(brandSrc.includes("⚠️ Urgent Update"), "company-brand footer must show Urgent Update when isUrgent is true");
-  assert.ok(brandSrc.includes('c === "update"'), "company-brand must listen to nextCommand for update");
-  console.log("PASS: Position 1 verified in company-brand (footer row & header button with urgency-aware labels and styling)");
-
-  // 4. Verify Position 2: company-status bottom status bar pill is clear and shows old -> new version transition
+  // 4. Verify company-status status bar pill triggers company-agents.update and shows transition
   assert.ok(statusSrc.includes('id("update-status-pill")'), "company-status must include update-status-pill");
-  assert.ok(!statusSrc.includes('`🚀 v${upd.version}`'), "company-status must NOT just show raw version like current version");
-  assert.ok(statusSrc.includes("✨ New update: ${verText}"), "company-status must clearly show '✨ New update: ${verText}' for normal type");
+  assert.ok(statusSrc.includes("✨ New update: ${verText}"), "company-status must show '✨ New update: ${verText}' for normal type");
   assert.ok(statusSrc.includes("⚠️ Urgent update: ${verText}"), "company-status must show '⚠️ Urgent update: ${verText}' for urgent type");
-  assert.ok(brandUpdaterSrc.includes("v${curVer} → v${newVer}"), "updater must calculate version transition string (v<old> → v<new>)");
-  assert.ok(statusSrc.includes('run("company-brand.update")'), "update-status-pill must trigger company-brand.update on click");
-  console.log("PASS: Position 2 verified in company-status (clear 'New update' pill showing old -> new transition and adapting to Type 1/2)");
+  assert.ok(statusSrc.includes('run("company-agents.update")'), "update-status-pill must trigger company-agents.update on click");
+  assert.ok(agentsUpdaterSrc.includes("v${curVer} → v${newVer}"), "updater must calculate version transition string (v<old> → v<new>)");
+  console.log("PASS: company-status displays update pill and invokes company-agents.update");
 
-  // 5. Verify company-agents office floor banner has been cleanly removed
-  assert.ok(!agentsSrc.includes('Pixel HQ ${this.update.version} is out'), "company-agents office floor must not render update banner");
-  assert.ok(!agentsSrc.includes('btn("upd-go"'), "company-agents must not render old upd-go button");
-  console.log("PASS: Obtrusive update banner cleanly eradicated from company-agents office floor");
+  // 5. Verify company-agents integration and direct update execution
+  assert.ok(agentsSrc.includes('if (c === "update") this.runUpdate()'), "company-agents must listen to nextCommand for update");
+  assert.ok(agentsSrc.includes("executePixelHqUpdate"), "company-agents must import and execute update directly");
+  assert.ok(agentsSrc.includes("checkPixelHqUpdate(true)"), "company-agents must check for updates on startup");
+  assert.ok(!agentsSrc.includes('Pixel HQ ${this.update.version} is out'), "company-agents office floor must not render intrusive banner");
+  console.log("PASS: company-agents executes update directly without modal");
 
-  console.log("All Update System Decoupling & Urgency Types tests passed!");
+  console.log("All Update System Background & Pristine Brand tests passed!");
 }
 
 runTests().catch((err) => {

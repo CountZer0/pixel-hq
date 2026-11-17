@@ -8,7 +8,7 @@ import { figureFor, load } from "./figures.js";
 import { agentOf, speciesOf, duckWidth, DUCK_CENTER, IDLE_SNOOZE, IDLE_URGE } from "./duck.js";
 import { scene, yHorizon } from "./scene.js";
 import { Editor } from "./editor.js";
-import { Updater } from "./updater.js";
+import { checkPixelHqUpdate, executePixelHqUpdate } from "./updater.js";
 import { snapshot, clashes, hire, agentTaskArgv } from "./crew.js";
 
 // The figure editor, as a dialog; `space` opens it on that space's pick.
@@ -282,7 +282,6 @@ export default class Agents extends View {
     if (props()?.needsYou) return;
     if (props()?.sortMenu) return;
     if (props()?.figures) { this.editor = new Editor(cx); return; }
-    if (props()?.updateModal) { this.updater = new Updater(cx); return; }
     // Figure sets come from ~/.config/herdr-app/pond-agents.json; hand edits show within seconds.
     this.file = {};
     const reload = (cx) => cx.spawn(async (cx) => {
@@ -342,6 +341,8 @@ export default class Agents extends View {
     this.setupClaude(cx);
     this.setupAntigravity(cx);
     this.setupCodex(cx);
+    checkPixelHqUpdate(true).then(() => cx.notify()).catch(() => {});
+    cx.timer.every(60000, (cx) => checkPixelHqUpdate(true).then(() => cx.notify()).catch(() => {}));
     // Now and then (every 14 to 32 s) one idle pet steps out beside its desk for about 3.6 s, then comes back.
     this.out = null;
     this.breakerList = [];
@@ -791,20 +792,7 @@ export default class Agents extends View {
   }
 
   runUpdate() {
-    if (Date.now() - Number(shared("pixel-hq.update-at") ?? 0) < 5000) return;
-    setShared("pixel-hq.update-at", Date.now());
-    openOverlay({
-      mod: "company-agents",
-      kind: "dialog",
-      modal: true,
-      width: 480,
-      height: 240,
-      props: {
-        updateModal: true,
-        version: this.update?.version,
-        notes: this.update?.notes,
-      },
-    });
+    executePixelHqUpdate();
   }
 
   // The paper pile on a desk: the first click arms it, the second (within 6 s) sends the agent /compact (which already summarizes).
@@ -1071,7 +1059,6 @@ export default class Agents extends View {
     if (props()?.sortMenu) return this.sortMenu(t);
     if (props()?.needsYou) return this.needsYou(t);
     if (this.editor) return this.editor.render(cx);
-    if (this.updater) return this.updater.render(cx);
     const dismissed = shared("pixel-hq.dismissed-version") || localStorage.getItem("upd-dismissed");
     if (this.update && dismissed === String(this.update.version)) {
       this.update = null;

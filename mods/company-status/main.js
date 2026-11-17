@@ -31,7 +31,13 @@ export default class WorkspaceStatus extends View {
       .child(label(space?.machine ? "server" : "monitor", space?.machine ?? "This computer"))
       .when(Boolean(space?.branch), el => el.child(label("branch", space.branch)))
       .child(div().text_color(t.dim).child(`${list.length} on the team`))
-      .when(Boolean(shared("pixel-hq.new-version")), (el) => {
+      .when(Boolean(shared("pixel-hq.updating")), (el) => el.child(
+        h_flex().id("update-status-pill").gap(6).items_center().px(7).py(2).rounded(6)
+          .bg("#89b4fa").text_color(t.chrome)
+          .tooltip("Downloading Pixel HQ update...")
+          .child(div().font_bold().text_size(11).child("⏳ Updating Pixel HQ..."))
+      ))
+      .when(Boolean(!shared("pixel-hq.updating") && shared("pixel-hq.new-version")), (el) => {
         const upd = shared("pixel-hq.new-version");
         const urgent = Boolean(upd?.isUrgent);
         const pillBg = urgent ? (t.blocked ?? "#f38ba8") : t.accent;
@@ -44,7 +50,7 @@ export default class WorkspaceStatus extends View {
           h_flex().id("update-status-pill").gap(6).items_center().px(7).py(2).rounded(6)
             .bg(pillBg).text_color(t.chrome).cursor_pointer().hover(s => s.opacity(0.85))
             .tooltip(tooltip)
-            .on_click(() => run("company-brand.update"))
+            .on_click(() => run("company-agents.update"))
             .child(div().font_bold().text_size(11).child(pillText))
         );
       })
