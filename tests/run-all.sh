@@ -7,6 +7,9 @@ echo "    Running Pixel HQ Agent Test Suite    "
 echo "=========================================="
 
 echo ""
+bash "$SCRIPT_DIR/test-syntax.test.sh"
+
+echo ""
 node "$SCRIPT_DIR/test-opencode-tabs.test.js"
 echo ""
 bash "$SCRIPT_DIR/test-statusline.test.sh"
