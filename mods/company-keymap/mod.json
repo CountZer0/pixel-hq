@@ -1,4 +1,9 @@
 {
   "place": "none",
-  "title": "Keymap & Workspace Switcher"
+  "title": "Keymap & Workspace Switcher",
+  "overlay": {
+    "kind": "dialog",
+    "width": 640,
+    "height": 520
+  }
 }

@@ -5,6 +5,8 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { spaces, agents, run, theme, props, closeOverlay, readTextFile, writeTextFile } from "herdr";
 
+const MONO = "JetBrains Mono, Menlo, monospace";
+
 const PRESETS = {
   vscode: {
     name: "VS Code / Fast Nav (Recommended)",
@@ -370,7 +372,7 @@ export default class CompanyKeymap extends View {
                             .child(
                               div()
                                 .text_size(10.5)
-                                .font_mono()
+                                .font_family(MONO)
                                 .text_color("#a6adc8")
                                 .child(`Alt+${i + 1}`),
                             ),
