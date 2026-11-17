@@ -130,7 +130,7 @@ export default class CompanyKeymap extends View {
         .items_center()
         .rounded(6)
         .cursor_pointer()
-        .bg(on ? "#313244" : "transparent")
+        .bg(on ? "#313244" : "#00000000")
         .text_color(on ? "#89b4fa" : "#a6adc8")
         .font_medium()
         .hover((s) => s.bg(on ? "#313244" : "#ffffff10").text_color("#cdd6f4"))
@@ -275,9 +275,9 @@ export default class CompanyKeymap extends View {
                     .items_center()
                     .justify_between()
                     .cursor_pointer()
-                    .bg(isSel ? "#313244" : on ? "#ffffff0c" : "transparent")
+                    .bg(isSel ? "#313244" : on ? "#ffffff0c" : "#00000000")
                     .border_1()
-                    .border_color(isSel ? "#89b4fa66" : on ? "#89b4fa33" : "transparent")
+                    .border_color(isSel ? "#89b4fa66" : on ? "#89b4fa33" : "#00000000")
                     .hover((st) => st.bg("#313244"))
                     .on_click(() => {
                       run("space.select", { id: s.id });
