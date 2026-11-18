@@ -1,5 +1,5 @@
 {
-  "version": "1.7.3",
+  "version": "1.7.4",
   "type": "normal",
-  "notes": "Add Pixel MusicBox: headless audio-only player for YouTube, SoundCloud, and radio streams"
+  "notes": "Fix yt-dlp install state feedback and speed up pip extraction"
 }

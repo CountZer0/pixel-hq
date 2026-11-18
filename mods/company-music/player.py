@@ -269,16 +269,42 @@ def find_ytdlp_bin():
     p = shutil.which("yt-dlp")
     if p:
         return p
+    exe_name = "yt-dlp.exe" if sys.platform == "win32" else "yt-dlp"
+    scripts_dir = os.path.join(os.path.dirname(sys.executable), "Scripts" if sys.platform == "win32" else "bin")
+    cand = os.path.join(scripts_dir, exe_name)
+    if os.path.isfile(cand):
+        return cand
+    try:
+        import site
+        if hasattr(site, "USER_BASE") and site.USER_BASE:
+            cand = os.path.join(site.USER_BASE, "Scripts" if sys.platform == "win32" else "bin", exe_name)
+            if os.path.isfile(cand):
+                return cand
+    except Exception:
+        pass
     if sys.platform == "win32":
         candidates = [
             os.path.expanduser(r"~\AppData\Local\Microsoft\WinGet\Links\yt-dlp.exe"),
-            os.path.expanduser(r"~\AppData\Local\Programs\Python\Python311\Scripts\yt-dlp.exe"),
-            os.path.expanduser(r"~\AppData\Local\Programs\Python\Python312\Scripts\yt-dlp.exe"),
             os.path.expanduser(r"~\scoop\shims\yt-dlp.exe"),
         ]
+        local_py = os.path.expanduser(r"~\AppData\Local\Programs\Python")
+        if os.path.isdir(local_py):
+            for entry in os.listdir(local_py):
+                c = os.path.join(local_py, entry, "Scripts", "yt-dlp.exe")
+                if os.path.isfile(c):
+                    return c
         for path in candidates:
             if os.path.isfile(path):
                 return path
+    elif sys.platform == "darwin":
+        for path in ("/opt/homebrew/bin/yt-dlp", "/usr/local/bin/yt-dlp"):
+            if os.path.isfile(path):
+                return path
+    try:
+        import yt_dlp
+        return [sys.executable, "-m", "yt_dlp"]
+    except ImportError:
+        pass
     return None
 
 def is_extractor_url(url):
@@ -298,9 +324,10 @@ def extract_stream_info(url):
                 clean_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}?v={qs['v'][0]}"
         except Exception:
             pass
+    cmd = yt_dlp if isinstance(yt_dlp, list) else [yt_dlp]
     try:
         r = subprocess.run(
-            [yt_dlp, "--no-warnings", "--no-playlist", "-f", "ba/b", "--print", "%(title)s", "-g", clean_url],
+            [*cmd, "--no-warnings", "--no-playlist", "-f", "ba/b", "--print", "%(title)s", "-g", clean_url],
             capture_output=True,
             text=True,
             timeout=18
