@@ -1,5 +1,5 @@
 {
-  "version": "1.7.0",
+  "version": "1.7.1",
   "type": "normal",
-  "notes": "A fancier tech corner in the office: a server rack and a modern desk with a monitor streaming a live log"
+  "notes": "Add workspace switcher with Ctrl+P cycling and hotkeys cheat sheet reference"
 }
