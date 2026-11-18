@@ -20,6 +20,7 @@ export default class CompanyMusic extends View {
     this.guideTab = window()?.platform === "windows" ? "windows" : window()?.platform === "macos" ? "macos" : "linux";
     this.installing = false;
     this.installMsg = null;
+    this.installSuccess = null;
 
     this.urlInput = InputState.new({ placeholder: "Paste YouTube, SoundCloud, or direct audio stream URL..." });
     this.urlInput.on("submit", (_e, cx) => this.play(this.urlInput.value(), null, cx));
@@ -29,8 +30,13 @@ export default class CompanyMusic extends View {
     this.urlInput.focus();
 
     const setup = shared("pixel-hq.music-setup");
-    if (setup?.installing && (!setup.startedAt || Date.now() - setup.startedAt > 180000)) {
-      setShared("pixel-hq.music-setup", { installing: false, msg: null });
+    if (setup?.installing) {
+      if (!setup.startedAt || Date.now() - setup.startedAt > 180000) {
+        setShared("pixel-hq.music-setup", { installing: false, msg: null });
+      } else {
+        this.installing = true;
+        this.installMsg = setup.msg;
+      }
     }
 
     if (checking()) return;
@@ -102,25 +108,102 @@ export default class CompanyMusic extends View {
     }
   }
 
+  async installYtDlpOnly(cx) {
+    if (this.installing) return;
+    this.installing = true;
+    this.installMsg = "Installing yt-dlp via pip (~3s)...";
+    this.installSuccess = null;
+    setShared("pixel-hq.music-setup", {
+      installing: true,
+      msg: this.installMsg,
+      startedAt: Date.now()
+    });
+    if (cx) cx.notify();
+
+    const isWin = window()?.platform === "windows" || this.depStatus?.platform === "win32";
+    const isMac = window()?.platform === "macos" || this.depStatus?.platform === "darwin";
+
+    let ok = false;
+    const pyCandidates = isWin ? ["python", "python3", "py"] : ["python3", "python"];
+    for (const py of pyCandidates) {
+      this.installMsg = `Running ${py} -m pip install yt-dlp...`;
+      if (cx) cx.notify();
+      const r = await exec(py, ["-m", "pip", "install", "--upgrade", "yt-dlp"], { timeout: 45000 }).catch(() => null);
+      if (r?.code === 0) {
+        ok = true;
+        break;
+      }
+    }
+
+    if (!ok) {
+      const pipCandidates = isWin ? ["pip", "pip3"] : ["pip3", "pip"];
+      for (const pip of pipCandidates) {
+        this.installMsg = `Running ${pip} install yt-dlp...`;
+        if (cx) cx.notify();
+        const r = await exec(pip, ["install", "--upgrade", "yt-dlp"], { timeout: 45000 }).catch(() => null);
+        if (r?.code === 0) {
+          ok = true;
+          break;
+        }
+      }
+    }
+
+    if (!ok && isMac) {
+      this.installMsg = "Running brew install yt-dlp...";
+      if (cx) cx.notify();
+      const r = await exec("brew", ["install", "yt-dlp"], { timeout: 90000 }).catch(() => null);
+      if (r?.code === 0) ok = true;
+    } else if (!ok && isWin) {
+      this.installMsg = "Running winget install yt-dlp...";
+      if (cx) cx.notify();
+      const r = await exec("winget", ["install", "yt-dlp.yt-dlp", "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity"], { timeout: 90000 }).catch(() => null);
+      if (r?.code === 0) ok = true;
+    }
+
+    this.installMsg = "Verifying yt-dlp installation...";
+    if (cx) cx.notify();
+    await this.checkDeps(cx);
+
+    this.installing = false;
+    setShared("pixel-hq.music-setup", { installing: false, msg: null });
+
+    if (this.depStatus?.has_ytdlp) {
+      this.error = null;
+      this.installSuccess = "yt-dlp installed successfully! Starting playback...";
+      if (cx) cx.notify();
+      const val = this.urlInput.value()?.trim();
+      if (val) {
+        cx.timer.after(600, () => this.play(val, null, cx));
+      }
+      cx.timer.after(4000, () => {
+        this.installSuccess = null;
+        if (cx) cx.notify();
+      });
+    } else {
+      this.error = "Could not install yt-dlp automatically. Click Open Terminal below to install manually.";
+      if (cx) cx.notify();
+    }
+  }
+
   async runAutoInstall(targetOs, cx) {
     if (this.installing) return;
 
     const detectedPlatform = window()?.platform || (this.depStatus?.platform === "win32" ? "windows" : this.depStatus?.platform === "darwin" ? "macos" : "linux");
     if (targetOs !== detectedPlatform) {
       this.installMsg = `Cannot run ${targetOs} package manager on ${detectedPlatform}. Switch to ${detectedPlatform} tab.`;
-      cx.notify();
+      if (cx) cx.notify();
       return;
     }
 
     this.installing = true;
-    this.installMsg = `Installing full dependencies (${targetOs === "windows" ? "FFmpeg + yt-dlp" : "ffmpeg + yt-dlp"})... Please wait`;
+    this.installMsg = "Installing dependencies... Please wait";
     setShared("pixel-hq.music-setup", {
       installing: true,
       msg: this.installMsg,
       targetOs,
       startedAt: Date.now()
     });
-    cx.notify();
+    if (cx) cx.notify();
 
     if (targetOs === "windows") {
       try {
@@ -130,15 +213,17 @@ export default class CompanyMusic extends View {
           await exec("winget", ["install", "Gyan.FFmpeg", "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity"], { timeout: 180000 }).catch(() => null);
         }
         if (!this.depStatus?.has_ytdlp) {
-          this.installMsg = "Installing yt-dlp (YouTube extractor)... Please wait";
+          this.installMsg = "Installing yt-dlp via pip...";
           if (cx) cx.notify();
-          await exec("winget", ["install", "yt-dlp.yt-dlp", "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity"], { timeout: 180000 }).catch(async () => {
-            const pyCandidates = ["python", "python3", "py"];
-            for (const py of pyCandidates) {
-              const r = await exec(py, ["-m", "pip", "install", "yt-dlp"], { timeout: 180000 }).catch(() => null);
-              if (r?.code === 0) break;
-            }
-          });
+          let ytdlpOk = false;
+          const pyCandidates = ["python", "python3", "py"];
+          for (const py of pyCandidates) {
+            const r = await exec(py, ["-m", "pip", "install", "--upgrade", "yt-dlp"], { timeout: 45000 }).catch(() => null);
+            if (r?.code === 0) { ytdlpOk = true; break; }
+          }
+          if (!ytdlpOk) {
+            await exec("winget", ["install", "yt-dlp.yt-dlp", "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity"], { timeout: 90000 }).catch(() => null);
+          }
         }
         this.installMsg = "Installation completed! Verifying dependencies...";
         await this.checkDeps(cx);
@@ -147,18 +232,40 @@ export default class CompanyMusic extends View {
       }
     } else if (targetOs === "macos") {
       try {
-        this.installMsg = "Installing ffmpeg and yt-dlp via Homebrew...";
-        if (cx) cx.notify();
-        await exec("brew", ["install", "ffmpeg", "yt-dlp"], { timeout: 180000 }).catch(() => null);
+        if (!this.depStatus?.has_player) {
+          this.installMsg = "Installing ffmpeg via Homebrew...";
+          if (cx) cx.notify();
+          await exec("brew", ["install", "ffmpeg"], { timeout: 180000 }).catch(() => null);
+        }
+        if (!this.depStatus?.has_ytdlp) {
+          this.installMsg = "Installing yt-dlp via pip...";
+          if (cx) cx.notify();
+          const r = await exec("python3", ["-m", "pip", "install", "--upgrade", "yt-dlp"], { timeout: 45000 }).catch(() => null);
+          if (r?.code !== 0) {
+            await exec("brew", ["install", "yt-dlp"], { timeout: 90000 }).catch(() => null);
+          }
+        }
+        this.installMsg = "Installation completed! Verifying dependencies...";
         await this.checkDeps(cx);
       } catch {
         this.installMsg = "Brew failed. Please use Open Terminal.";
       }
     } else if (targetOs === "linux") {
       try {
-        this.installMsg = "Installing ffmpeg and yt-dlp...";
-        if (cx) cx.notify();
-        await exec("sh", ["-c", "which apt-get && sudo apt-get update && sudo apt-get install -y ffmpeg yt-dlp || sudo dnf install -y ffmpeg yt-dlp || sudo pacman -S --noconfirm ffmpeg yt-dlp || python3 -m pip install yt-dlp"], { timeout: 180000 }).catch(() => null);
+        if (!this.depStatus?.has_player) {
+          this.installMsg = "Installing ffmpeg...";
+          if (cx) cx.notify();
+          await exec("sh", ["-c", "which apt-get && sudo apt-get update && sudo apt-get install -y ffmpeg || sudo dnf install -y ffmpeg || sudo pacman -S --noconfirm ffmpeg"], { timeout: 180000 }).catch(() => null);
+        }
+        if (!this.depStatus?.has_ytdlp) {
+          this.installMsg = "Installing yt-dlp via pip...";
+          if (cx) cx.notify();
+          const r = await exec("python3", ["-m", "pip", "install", "--upgrade", "yt-dlp"], { timeout: 45000 }).catch(() => null);
+          if (r?.code !== 0) {
+            await exec("sh", ["-c", "sudo apt-get install -y yt-dlp || sudo dnf install -y yt-dlp || sudo pacman -S --noconfirm yt-dlp"], { timeout: 90000 }).catch(() => null);
+          }
+        }
+        this.installMsg = "Installation completed! Verifying dependencies...";
         await this.checkDeps(cx);
       } catch {
         this.installMsg = "Install failed. Run in Terminal (sudo required).";
@@ -170,7 +277,7 @@ export default class CompanyMusic extends View {
       installing: false,
       msg: this.installMsg
     });
-    cx.notify();
+    if (cx) cx.notify();
   }
 
   async play(url, presetTitle, cx) {
@@ -765,43 +872,75 @@ export default class CompanyMusic extends View {
               )
           )
       )
-      .when(Boolean(activeError), (el) =>
+      .when(Boolean(this.installSuccess), (el) =>
+        el.child(
+          h_flex()
+            .w_full()
+            .px(10)
+            .py(7)
+            .rounded(6)
+            .bg("#a6e3a122")
+            .border_1()
+            .border_color("#a6e3a155")
+            .gap(6)
+            .items_center()
+            .child(div().text_size(11).child("✓"))
+            .child(div().font_bold().text_size(10.5).text_color("#a6e3a1").child(this.installSuccess))
+        )
+      )
+      .when(Boolean(activeError || this.installing), (el) =>
         el.child(
           v_flex()
             .w_full()
             .px(10)
             .py(8)
             .rounded(6)
-            .bg("#f38ba822")
+            .bg(this.installing ? "#f9e2af1a" : "#f38ba822")
             .border_1()
-            .border_color("#f38ba855")
+            .border_color(this.installing ? "#f9e2af44" : "#f38ba855")
             .gap(4)
             .child(
               h_flex()
                 .gap(6)
                 .items_center()
-                .child(div().text_size(11).child("⚠️"))
-                .child(div().font_bold().text_size(11).text_color("#f38ba8").child("Audio Player Error"))
+                .child(div().text_size(11).child(this.installing ? "⏳" : "⚠️"))
+                .child(div().font_bold().text_size(11).text_color(this.installing ? "#f9e2af" : "#f38ba8").child(this.installing ? "Installing Audio Extractor..." : "Audio Player Error"))
                 .child(div().flex_1())
-                .when(Boolean(activeError && activeError.includes("yt-dlp")), (headEl) =>
+                .when(Boolean((activeError && activeError.includes("yt-dlp")) || this.installing), (headEl) =>
                   headEl.child(
                     div()
-                      .cursor_pointer()
-                      .px(6)
-                      .py(1)
-                      .rounded(3)
-                      .bg("#89b4fa22")
-                      .border_1()
-                      .border_color("#89b4fa55")
-                      .text_size(10)
-                      .font_semibold()
-                      .text_color("#89b4fa")
-                      .hover((s) => s.bg("#89b4fa44"))
-                      .on_click((_e, cx) => this.runAutoInstall(this.guideTab, cx))
-                      .child("⚡ Install yt-dlp")
+                      .when(this.installing, (b) =>
+                        b
+                          .px(7)
+                          .py(2)
+                          .rounded(3)
+                          .bg("#313244")
+                          .border_1()
+                          .border_color("#45475a")
+                          .text_size(10)
+                          .font_semibold()
+                          .text_color("#f9e2af")
+                          .child("⏳ Installing yt-dlp...")
+                      )
+                      .when(!this.installing, (b) =>
+                        b
+                          .cursor_pointer()
+                          .px(6)
+                          .py(1)
+                          .rounded(3)
+                          .bg("#89b4fa22")
+                          .border_1()
+                          .border_color("#89b4fa55")
+                          .text_size(10)
+                          .font_semibold()
+                          .text_color("#89b4fa")
+                          .hover((s) => s.bg("#89b4fa44"))
+                          .on_click((_e, cx) => this.installYtDlpOnly(cx))
+                          .child("⚡ Install yt-dlp")
+                      )
                   )
                 )
-                .when(missingPlayer, (headEl) =>
+                .when(missingPlayer && !this.installing, (headEl) =>
                   headEl.child(
                     div()
                       .cursor_pointer()
@@ -821,7 +960,17 @@ export default class CompanyMusic extends View {
                   )
                 )
             )
-            .child(div().text_size(10.5).text_color("#eba0ac").child(activeError))
+            .when(this.installing, (bodyEl) =>
+              bodyEl.child(
+                h_flex()
+                  .gap(6)
+                  .items_center()
+                  .child(div().text_size(10.5).font_medium().text_color("#f9e2af").child(this.installMsg || "Installing yt-dlp via pip (~3s)... Please wait"))
+              )
+            )
+            .when(!this.installing, (bodyEl) =>
+              bodyEl.child(div().text_size(10.5).text_color("#eba0ac").child(activeError || ""))
+            )
         )
       )
       .child(
