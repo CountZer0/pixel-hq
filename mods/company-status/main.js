@@ -4,6 +4,11 @@ import { spaces, panes, focused, agents, theme, run, window, keys, setBadge, ope
 
 const MONO = "JetBrains Mono, Menlo, monospace";
 
+function getPythonBins() {
+  const isWin = window()?.platform === "windows" || appHome().includes(":\\");
+  return isWin ? ["python", "pythonw", "python3", "py"] : ["python3", "python"];
+}
+
 function formatTime(seconds) {
   if (!seconds || isNaN(seconds) || seconds < 0) return "00:00";
   const s = Math.floor(seconds);
@@ -31,8 +36,7 @@ export default class WorkspaceStatus extends View {
       this.polling = true;
       try {
         const script = `${appHome()}/mods/company-music/player.py`;
-        const candidates = window()?.platform === "windows" ? ["pythonw", "python", "python3", "py"] : ["python3", "python"];
-        for (const bin of candidates) {
+        for (const bin of getPythonBins()) {
           const r = await exec(bin, [script, "status"], { timeout: 15000 }).catch(() => null);
           if (!r?.stdout) continue;
           try {
@@ -65,8 +69,7 @@ export default class WorkspaceStatus extends View {
     }
     try {
       const script = `${appHome()}/mods/company-music/player.py`;
-      const candidates = window()?.platform === "windows" ? ["pythonw", "python", "python3", "py"] : ["python3", "python"];
-      for (const bin of candidates) {
+      for (const bin of getPythonBins()) {
         const r = await exec(bin, [script, action], { timeout: 35000 }).catch(() => null);
         if (!r?.stdout) continue;
         try {

@@ -13,6 +13,7 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 def get_subprocess_kwargs(**kwargs):
+    kwargs["close_fds"] = True
     if sys.platform == "win32":
         flags = kwargs.get("creationflags", 0)
         DETACHED_PROCESS = 0x00000008
