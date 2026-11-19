@@ -1437,7 +1437,8 @@ export default class Agents extends View {
       const sy = rowsUsed > 1 ? (Math.floor(slot / colsUsed) + ((slot % colsUsed) % 2) * (rowsUsed < 3 ? 0.12 : 0)) / (rowsUsed - 1 + (rowsUsed < 3 ? 0.12 : 0)) : 0;
       const lap = 0;
       const own = this.petpos[a.address];
-      const left = own ? own[0] * sz.width : Math.max(2, Math.min(sz.width - petW - 2, sz.width * Math.min(0.92, sx + lap) - petW / 2));
+      // Room for the cubicle panels (9 units each side) and the server rack (11 units right), so an edge desk shows them.
+      const left = own ? own[0] * sz.width : Math.max(kk(10), Math.min(sz.width - petW - kk(12), sz.width * Math.min(0.92, sx + lap) - petW / 2));
       const top = own ? own[1] * sz.height : fieldTop + fieldH * Math.min(1, sy + lap);
       posOf.set(a.address, { x: left + petW / 2, y: top + PET * 0.5 });
       const ctx = contextOf.get(a.address);

@@ -1,5 +1,5 @@
 name: pixel-hq-status
-version: 1.4.2
+version: 1.4.3
 description: "Reports Hermes Agent's status to the Herdr app (OSC 7501) so Pixel HQ gives it a desk: working, blocked on approvals or questions, idle. Labels the terminal with how full the context is."
 author: "Pixel HQ"
 provides_hooks:

@@ -1,4 +1,4 @@
-# pixel-hq-hermes v7
+# pixel-hq-hermes v8
 """Hermes plugin for the Herdr app: makes Hermes Agent show up as staff in Pixel HQ.
 
 Herdr only counts a terminal as an agent when its program reports a status (an OSC 7501 escape
@@ -375,7 +375,9 @@ def _tool_start(**kwargs) -> None:
         term = _terminal(kwargs)
         if term:
             desk = _desk(term)
-            if desk.turn_open is False:
+            # After the main turn ended, only a sub-agent's shell work counts (it runs on in the background); the main
+            # session's calls then come from Hermes' post-turn review.
+            if desk.turn_open is False and kwargs.get("session_id") not in _children:
                 return
             desk.worked = True
             desk.jobs[_tool_id(kwargs)] = time.monotonic()
