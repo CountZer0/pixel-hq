@@ -991,7 +991,7 @@ export default class CompanyMusic extends View {
                   .bg(isMusicHidden ? "#45475a" : "#313244")
                   .text_color(isMusicHidden ? "#f9e2af" : t.dim)
                   .hover((s) => s.bg(t.hover).text_color(t.foreground))
-                  .tooltip(isMusicHidden ? "Hiện lại trên thanh trạng thái" : "Ẩn MusicBox khỏi thanh trạng thái (Right-click trên status bar cũng ẩn được)")
+                  .tooltip(isMusicHidden ? "Show on status bar" : "Hide MusicBox from status bar (Right-click status bar button also hides)")
                   .on_click((_e, cx) => {
                     const nextVal = !isMusicBoxHidden();
                     try {
@@ -1007,7 +1007,7 @@ export default class CompanyMusic extends View {
                     });
                     cx.notify();
                   })
-                  .child(isMusicHidden ? "👁️ Hiện thanh trạng thái" : "👁️ Ẩn khỏi status bar")
+                  .child(isMusicHidden ? "👁️ Show on status bar" : "👁️ Hide from status bar")
               )
               .child(
                 div()
@@ -1037,7 +1037,7 @@ export default class CompanyMusic extends View {
             .items_center()
             .gap(6)
             .child(div().text_size(11).child("💡"))
-            .child(div().text_size(10.5).text_color("#f9e2af").child("Đã ẩn MusicBox, bạn có thể bật lại bằng Ctrl + Shift + M"))
+            .child(div().text_size(10.5).text_color("#f9e2af").child("MusicBox is hidden. You can reopen it with Ctrl + Shift + M"))
         )
       )
       .child(
@@ -1335,7 +1335,7 @@ export default class CompanyMusic extends View {
                     .font_semibold()
                     .text_color("#cdd6f4")
                     .hover((s) => s.bg("#45475a"))
-                    .tooltip("Bài trước / Đài trước (Previous)")
+                    .tooltip("Previous track / station")
                     .on_click((_e, cx) => this.prev(cx))
                     .child("⏮ Prev")
                 )
@@ -1414,7 +1414,7 @@ export default class CompanyMusic extends View {
                     .font_semibold()
                     .text_color("#cdd6f4")
                     .hover((s) => s.bg("#45475a"))
-                    .tooltip("Bài kế tiếp / Đài kế tiếp (Next)")
+                    .tooltip("Next track / station")
                     .on_click((_e, cx) => this.next(cx))
                     .child("⏭ Next")
                 )

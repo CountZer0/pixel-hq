@@ -272,7 +272,7 @@ export default class WorkspaceStatus extends View {
             const timeText = dur > 0 ? `${formatTime(liveElapsed)}/${formatTime(dur)}` : formatTime(liveElapsed);
             if (isPlaying || isPaused || isBuffering) {
               const playPauseIcon = isPlaying ? "⏸" : "▶";
-              const playPauseTooltip = isPlaying ? "Tạm dừng (Pause)" : "Tiếp tục phát (Resume)";
+              const playPauseTooltip = isPlaying ? "Pause" : "Resume";
               return h_flex()
                 .id("btn-music-bar")
                 .gap(3)
@@ -299,7 +299,7 @@ export default class WorkspaceStatus extends View {
                     .text_size(13.5)
                     .text_color(t.dim)
                     .hover((s) => s.bg(t.hover).text_color(t.foreground))
-                    .tooltip("Bài trước / Đài trước (Previous)")
+                    .tooltip("Previous track / station")
                     .on_click((_e, cx) => this.musicAction("prev", cx))
                     .child("⏮")
                 )
@@ -331,7 +331,7 @@ export default class WorkspaceStatus extends View {
                     .text_size(13.5)
                     .text_color("#f38ba8")
                     .hover((s) => s.bg(t.hover))
-                    .tooltip("Dừng phát (Stop)")
+                    .tooltip("Stop playback")
                     .on_click((_e, cx) => this.musicAction("stop", cx))
                     .child("⏹")
                 )
@@ -347,7 +347,7 @@ export default class WorkspaceStatus extends View {
                     .text_size(13.5)
                     .text_color(t.dim)
                     .hover((s) => s.bg(t.hover).text_color(t.foreground))
-                    .tooltip("Bài kế tiếp / Đài kế tiếp (Next)")
+                    .tooltip("Next track / station")
                     .on_click((_e, cx) => this.musicAction("next", cx))
                     .child("⏭")
                 )
@@ -361,7 +361,7 @@ export default class WorkspaceStatus extends View {
                     .rounded(4)
                     .max_w(250)
                     .hover((s) => s.bg(t.hover))
-                    .tooltip(`Pixel MusicBox: ${title} (${timeText}) · Mở bảng điều khiển · Chuột phải để ẩn khỏi thanh trạng thái`)
+                    .tooltip(`Pixel MusicBox: ${title} (${timeText}) · Open controls · Right-click to hide from status bar`)
                     .on_click(() => run("mod.open", { name: "company-music" }))
                     .child(div().text_size(12).child("📻"))
                     .child(div().truncate().text_size(11.5).font_semibold().text_color(t.foreground).child(title))
@@ -384,7 +384,7 @@ export default class WorkspaceStatus extends View {
               .text_color(t.dim)
               .cursor_pointer()
               .hover((s) => s.bg(t.hover).text_color(t.foreground))
-              .tooltip("Open Pixel MusicBox · Chuột phải để ẩn khỏi thanh trạng thái")
+              .tooltip("Open Pixel MusicBox · Right-click to hide from status bar")
               .on_click(() => run("mod.open", { name: "company-music" }))
               .on_mouse_down("right", (_e, cx) => {
                 cx.stop_propagation();

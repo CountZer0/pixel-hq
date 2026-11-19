@@ -1,5 +1,5 @@
 {
-  "version": "1.7.10",
+  "version": "1.7.11",
   "type": "normal",
-  "notes": "Add default Ctrl+Shift+M hotkey and in-modal guidance for MusicBox toggle"
+  "notes": "Translate all UI text, tooltips, and hotkey descriptions to English"
 }

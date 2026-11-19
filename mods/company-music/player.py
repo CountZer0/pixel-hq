@@ -548,7 +548,7 @@ def extract_stream_info(url):
         err_msg = r.stderr.strip() if r.stderr else ""
         if "Sign in to confirm you're not a bot" in err_msg or "Sign in to confirm you’re not a bot" in err_msg:
             log_debug(f"cmd_extract_stream_info bot_check: {err_msg}")
-            return None, None, 0, "YouTube anti-bot challenge: YouTube tạm chặn IP do nghe nhiều bài liên tục ('Sign in to confirm you're not a bot'). Bạn có thể đổi mạng/VPN hoặc đợi 30-60 phút."
+            return None, None, 0, "YouTube anti-bot challenge: YouTube temporarily blocked this IP due to continuous playback ('Sign in to confirm you're not a bot'). You can switch networks/VPN or wait 30-60 minutes."
         log_debug(f"cmd_extract_stream_info error: returncode={r.returncode}, stderr={err_msg}")
     except Exception as e:
         log_debug(f"cmd_extract_stream_info exception: {e}")
