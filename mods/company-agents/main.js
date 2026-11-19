@@ -5,7 +5,7 @@ import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, appHome, exec, readTextFile, writeTextFile, nextCommand, hc, knownAgents, checking } from "herdr";
 import { figureFor, load } from "./figures.js";
-import { agentOf, speciesOf, duckWidth, DUCK_CENTER, IDLE_SNOOZE, IDLE_URGE } from "./duck.js";
+import { agentOf, speciesOf, duckWidth, duckMood, mood, DUCK_CENTER, IDLE_SNOOZE, IDLE_URGE } from "./duck.js";
 import { scene, yHorizon } from "./scene.js";
 import { Editor } from "./editor.js";
 import { checkPixelHqUpdate, executePixelHqUpdate } from "./updater.js";
@@ -1234,6 +1234,20 @@ export default class Agents extends View {
         effort: (isClaude ? labels["claude.effort"] || labels["agent.effort"] : labels["agent.effort"]) || null,
       }]];
     }));
+    // How much is going on at each desk. Interns: Hermes' running sub-agents (agent.threads, from its plugin) and, for any
+    // agent, the live child terminals it started with `hc run` (each in its own species and mood). Server rack: Hermes'
+    // shell work (agent.jobs: commands in flight plus background processes; agent.jobs_long: those past a minute).
+    const activityOf = new Map(all.map((k) => {
+      const labels = k.labels ?? {};
+      const n = (v) => { const x = Number.parseInt(v, 10); return Number.isFinite(x) && x > 0 ? x : 0; };
+      const hermes = progOf(k).toLowerCase() === "hermes";
+      const kids = all.filter((c) => c.parent === k.address && c.state === "live");
+      const interns = [
+        ...Array.from({ length: hermes ? Math.min(n(labels["agent.threads"]), 50) : 0 }, () => ({ status: "working", species: speciesOf("hermes") })),
+        ...kids.map((c) => ({ status: String(c.status?.state ?? c.status ?? "idle"), species: speciesOf(progOf(c)) })),
+      ];
+      return [k.address, { interns, jobs: hermes ? n(labels["agent.jobs"]) : 0, long: hermes ? n(labels["agent.jobs_long"]) : 0 }];
+    }));
     for (const [addr, c] of this.ctxRead) {
       const prev = contextOf.get(addr);
       contextOf.set(addr, {
@@ -1428,6 +1442,9 @@ export default class Agents extends View {
       posOf.set(a.address, { x: left + petW / 2, y: top + PET * 0.5 });
       const ctx = contextOf.get(a.address);
       const ctxPct = ctx?.pct ?? null;
+      const act = activityOf.get(a.address) ?? { interns: [], jobs: 0, long: 0 };
+      // Typing speeds up with every intern and job at the desk, up to twice as fast.
+      const pace = 1 + Math.min(1, 0.25 * (act.interns.length + act.jobs));
       const modelTxt = ctx ? modelOf(ctx) : "";
       const more = detail.get(a.address);
       const text = (shared("pixel-hq.names") ?? {})[a.pane]?.name ?? more ?? a.space_name ?? label(a);
@@ -1483,7 +1500,7 @@ export default class Agents extends View {
           .left(away ? dx : 0).top(away ? dy : 0)
           // Glide out and back, but not while it is being dragged, so it follows the pointer exactly.
           .when(this.drag?.addr !== a.address, (el) => el.transition("left", 800).transition("top", 800))
-          .child(figureFor(a.space_name, isNudged ? "done" : a.status, PET, unseen, speciesOf(progOf(a)))))
+          .child(figureFor(a.space_name, isNudged ? "done" : a.status, PET, unseen, speciesOf(progOf(a)), pace)))
         // Shipped: pixel confetti rains over the desk until someone looks at it.
         .when(a.status === "done", (el) => el.children([["#f9e2af", 0.10, 900], ["#f38ba8", 0.22, 1300], ["#a6e3a1", 0.34, 1000], ["#89b4fa", 0.46, 1500], ["#cba6f7", 0.58, 1100], ["#fab387", 0.70, 1400], ["#94e2d5", 0.82, 950]]
           .map(([c, fx0, p], j) => div().absolute().left(petW * fx0).top(-20).w(4).h(4).bg(c).loop("top", { from: -22 - (j % 3) * 6, to: PET * 0.55, period: p, easing: "linear" }))))
@@ -1494,6 +1511,24 @@ export default class Agents extends View {
         .child(div().absolute().left(-kk(3)).top(PET * 0.84 + kk(12)).w(petW + kk(6)).h(kk(10)).bg("#3b3f5a"))
         .child(div().absolute().left(ctr - kk(8)).top(PET * 0.84 + kk(15)).w(kk(16)).h(kk(3)).bg("#262a40"))
         .child(div().absolute().left(petW - kk(6)).top(PET * 0.84 - kk(4)).w(kk(7)).h(kk(4)).rounded(2).bg("#c9cee6"))
+        // A server rack on the right cubicle panel: one blinking LED per shell job, amber once it has run over a minute.
+        .when(act.jobs > 0, (el) => {
+          const rackTop = PET * 0.3, rackH = PET * 0.66, fit = Math.max(1, Math.floor((rackH - kk(4)) / kk(5)));
+          const leds = Array.from({ length: Math.min(act.jobs, fit) }, (_, i) => div().absolute().left(kk(2)).top(kk(3) + i * kk(5)).w(kk(5)).h(Math.max(2, kk(3))).rounded(1)
+            .bg(i < act.long ? "#f9b84a" : "#a6e3a1").loop("opacity", { from: 0.3, to: 1, period: 360 + ((i * 137) % 420), easing: "linear" }));
+          return el.child(div().absolute().left(petW + kk(2)).top(rackTop).w(kk(9)).h(rackH).rounded(2).bg("#161827").border_1().border_color("#2e3250")
+            .child(div().absolute().left(kk(2)).top(rackH - kk(4)).w(kk(5)).h(kk(1)).bg("#2e3250"))
+            .children(leds));
+        })
+        // Interns in front of the desk, one tiny pet per running sub-agent (three at most, then "+N").
+        .when(act.interns.length > 0, (el) => {
+          const ih = Math.max(12, Math.round(PET * 0.38)), iw = duckWidth(ih), step = Math.round(iw * 0.62);
+          const top = PET * 0.84 + kk(22) - ih, shown = act.interns.slice(0, 3), extra = act.interns.length - shown.length;
+          return el
+            .children(shown.map((it, j) => div().absolute().left(kk(2) + j * step).top(top).child(duckMood(mood(it.status, 0), ih, { species: it.species }))))
+            .when(extra > 0, (e2) => e2.child(div().absolute().left(kk(2) + shown.length * step + Math.round(iw * 0.45)).top(top + Math.round(ih * 0.3)).px(3).rounded(3)
+              .bg("#0f111acc").text_size(Math.max(8, kk(9))).text_color("#cdd6f4").child(`+${extra}`)));
+        })
         // Papers pile up on the desk as the agent's context fills: one sheet per 10%, the top ones turn pink past 80%.
         .when(Boolean(ctxPct != null && ctxPct >= 5), (el) => {
           const n = Math.max(1, Math.min(10, Math.ceil(ctxPct / 10)));
@@ -1533,7 +1568,7 @@ export default class Agents extends View {
         })
         .on_mouse_up("left", (_e, cx) => endDrag(cx))
         .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); openFigures(a.space_name); })
-        .tooltip(`${a.program?.name ?? ""} · ${isUrge ? `idle for ${duration(waited)} · click to focus` : isSnooze ? `snoozing (${duration(waited)}) · click to focus` : a.status} · ${text}${branch ? ` · ${branch}` : ""}${clTip ? ` · ${clTip}` : ""}${ctx ? ` · ${vitalsTip(ctx)}` : ""} · drag to move`)
+        .tooltip(`${a.program?.name ?? ""} · ${isUrge ? `idle for ${duration(waited)} · click to focus` : isSnooze ? `snoozing (${duration(waited)}) · click to focus` : a.status} · ${text}${branch ? ` · ${branch}` : ""}${clTip ? ` · ${clTip}` : ""}${ctx ? ` · ${vitalsTip(ctx)}` : ""}${act.interns.length ? ` · ${act.interns.length} sub-agent${act.interns.length > 1 ? "s" : ""}` : ""}${act.jobs ? ` · ${act.jobs} shell job${act.jobs > 1 ? "s" : ""}${act.long ? ` (${act.long} over a minute)` : ""}` : ""} · drag to move`)
         .child(seat)
         .child(div().mt(6).max_w(Math.max(petW + 22, cellW - 4)).px(5).h(15).flex().items_center().rounded(3)
           .bg(this.hint?.addr === a.address ? "#cba6f7" : cl ? (cl.kind === "file" ? "#ff5370" : "#f9b84a") : a.focused || (q && hitOf(a)) ? "#f9e2af" : hot ? "#f38ba8" : isUrge ? "#fab387" : isSnooze ? "#45475a" : "#0f111acc")
