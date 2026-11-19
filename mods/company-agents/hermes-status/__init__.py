@@ -1,4 +1,4 @@
-# pixel-hq-hermes v6
+# pixel-hq-hermes v7
 """Hermes plugin for the Herdr app: makes Hermes Agent show up as staff in Pixel HQ.
 
 Herdr only counts a terminal as an agent when its program reports a status (an OSC 7501 escape
@@ -71,6 +71,10 @@ class _Desk:
         self.jobs: dict[str, float] = {}     # in-flight shell tool call id -> when it started
         self.activity = None                 # the last (threads, jobs, long) published
         self.worked = False                  # set by the first work hook: only the process running the agent publishes
+        # True between a turn's start and end, False after a turn ended, None before any turn was seen. Once a turn has
+        # ended, only the next turn start makes the desk work again: Hermes' background review after a turn (memory and
+        # skills, thread bg-review) makes model and tool calls in the same session, with no turn end of its own.
+        self.turn_open = None
 
 
 def _desk(term: str) -> _Desk:
@@ -287,6 +291,7 @@ def _turn_start(**kwargs) -> None:
     parent = kwargs.get("parent_session_id")
     with _lock:
         desk.worked = True
+    desk.turn_open = True
     if not parent or desk.main is None or (sid != desk.main and parent == desk.main):
             desk.main = sid  # a new conversation, or a compressed one continuing under a new id
     _report(desk, "working")
@@ -304,6 +309,7 @@ def _turn_end(**kwargs) -> None:
         return
     desk.waiting = 0
     desk.jobs.clear()
+    desk.turn_open = False
     _report(desk, "idle")
 
 
@@ -313,6 +319,7 @@ def _stopped(**kwargs) -> None:
         desk = _desk(term)
         desk.waiting = 0
         desk.jobs.clear()
+        desk.turn_open = False
         _report(desk, "idle")
 
 
@@ -368,6 +375,8 @@ def _tool_start(**kwargs) -> None:
         term = _terminal(kwargs)
         if term:
             desk = _desk(term)
+            if desk.turn_open is False:
+                return
             desk.worked = True
             desk.jobs[_tool_id(kwargs)] = time.monotonic()
 
@@ -432,6 +441,8 @@ def _busy(**kwargs) -> None:
     term = _terminal(kwargs)
     if term:
         desk = _desk(term)
+        if desk.turn_open is False:
+            return  # after the turn: a background review, not the person's task
         desk.worked = True
         if desk.last != "blocked":
             _report(desk, "working")
@@ -445,7 +456,7 @@ def _api_done(**kwargs) -> None:
     term = _terminal(kwargs)
     if not term:
         return
-    if _desk(term).last != "blocked":
+    if _desk(term).last != "blocked" and _desk(term).turn_open is not False:
         _report(_desk(term), "working")
     usage = kwargs.get("usage") or {}
     try:
