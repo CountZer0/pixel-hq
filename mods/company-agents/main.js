@@ -6,7 +6,7 @@ import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, appHome, exec, readTextFile, writeTextFile, nextCommand, hc, knownAgents, checking } from "herdr";
 import { figureFor, load } from "./figures.js";
 import { agentOf, speciesOf, duckWidth, duckMood, mood, DUCK_CENTER, IDLE_SNOOZE, IDLE_URGE } from "./duck.js";
-import { scene, yHorizon } from "./scene.js";
+import { scene, sceneLayout, yHorizon } from "./scene.js";
 import { Editor } from "./editor.js";
 import { checkPixelHqUpdate, executePixelHqUpdate } from "./updater.js";
 import { snapshot, clashes, hire, agentTaskArgv } from "./crew.js";
@@ -68,6 +68,28 @@ const SORTS = [
 const sortOf = () => SORTS.find((s) => s.id === shared("agents.sort")) ?? SORTS[0];
 const SECTION = { 4: "Needs you", 3: "Done", 2: "Working", 1: "Idle" };
 const SECTION_STATUS = { 4: "blocked", 3: "done", 2: "working" };
+
+// How much is going on at each desk. Interns: Hermes' running sub-agents (agent.threads, from its plugin) and, for any agent,
+// the live child terminals it started with `hc run` (each in its own species and mood). Server rack: Hermes' shell work
+// (agent.jobs: commands in flight plus background processes; agent.jobs_long: those past a minute).
+function activityAll(all) {
+  return new Map(all.map((k) => {
+    const labels = k.labels ?? {};
+    const n = (v) => { const x = Number.parseInt(v, 10); return Number.isFinite(x) && x > 0 ? x : 0; };
+    const hermes = progOf(k).toLowerCase() === "hermes";
+    const kids = all.filter((c) => c.parent === k.address && c.state === "live");
+    const interns = [
+      ...Array.from({ length: hermes ? Math.min(n(labels["agent.threads"]), 50) : 0 }, () => ({ status: "working", species: speciesOf("hermes") })),
+      ...kids.map((c) => ({ status: String(c.status?.state ?? c.status ?? "idle"), species: speciesOf(progOf(c)) })),
+    ];
+    return [k.address, { interns, jobs: hermes ? n(labels["agent.jobs"]) : 0, long: hermes ? n(labels["agent.jobs_long"]) : 0 }];
+  }));
+}
+
+// Today, for the plant and the clock: tasks shipped (an agent going from working to idle or done), time agents spent working, and
+// where. Kept by the office copy in localStorage and shared ("pixel-hq.today") for the clock's popup; it starts over each day.
+const dayKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const freshDay = () => ({ day: dayKey(), shipped: 0, workMs: 0, bySpace: {} });
 
 function duration(ms) {
   const m = Math.floor(ms / 60000);
@@ -280,7 +302,7 @@ const agyTranscriptVitals = async (cwd, machine) => {
 
 export default class Agents extends View {
   init(_props, cx) {
-    if (props()?.needsYou) return;
+    if (props()?.needsYou || props()?.workload || props()?.today) return;
     if (props()?.sortMenu) return;
     if (props()?.figures) { this.editor = new Editor(cx); return; }
     // Figure sets come from ~/.config/herdr-app/pond-agents.json; hand edits show within seconds.
@@ -383,6 +405,11 @@ export default class Agents extends View {
     });
     // Each agent's last state and when it changed (ms), kept across restarts.
     this.changed = JSON.parse(localStorage.getItem("changed") ?? "{}");
+    try { this.today = JSON.parse(localStorage.getItem("today") ?? "null"); } catch { this.today = null; }
+    if (!this.today || this.today.day !== dayKey()) this.today = freshDay();
+    if (JSON.stringify(shared("pixel-hq.today")) !== JSON.stringify(this.today)) setShared("pixel-hq.today", this.today);
+    // The clock on the wall and the sky in the windows: one redraw a minute.
+    cx.timer.every(60000, (cx) => cx.notify());
     try { this.seen = JSON.parse(localStorage.getItem("seen") ?? "{}"); } catch { this.seen = {}; }
     try { this.settled = new Set(JSON.parse(localStorage.getItem("settled") ?? "[]")); } catch { this.settled = new Set(); }
     this.watching = null;
@@ -398,7 +425,9 @@ export default class Agents extends View {
     let dirty = false;
     for (const a of list) {
       const s = a.status === "done" ? "idle" : a.status;
-      if (this.changed[a.address]?.s === s) continue;
+      const prev = this.changed[a.address];
+      if (prev?.s === s) continue;
+      if (prev?.s === "working") this.tally(a, s, prev.at, now);
       this.changed[a.address] = { s, at: now };
       dirty = true;
     }
@@ -410,6 +439,20 @@ export default class Agents extends View {
     try { localStorage.setItem("changed", JSON.stringify(this.changed)); } catch { /* storage blocked: the shared stamps still carry for this session */ }
     // The floor copy and the needs-you popup are separate copies with separate storage: share the stamps so the popup sorts truthfully.
     setShared("pixel-hq.changed", this.changed);
+  }
+
+  // An agent stopped working: add its time to today (counted from midnight at most, six hours at most) and, if it finished
+  // rather than waiting on you, one task shipped.
+  tally(a, s, from, now) {
+    if (!this.today || this.today.day !== dayKey()) this.today = freshDay();
+    const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+    const ms = Math.max(0, Math.min(6 * 3600000, now - Math.max(from, midnight.getTime())));
+    this.today.workMs += ms;
+    const where = a.space_name || "?";
+    this.today.bySpace[where] = (this.today.bySpace[where] ?? 0) + ms;
+    if (s === "idle") this.today.shipped += 1;
+    try { localStorage.setItem("today", JSON.stringify(this.today)); } catch { /* storage blocked: kept in memory */ }
+    setShared("pixel-hq.today", this.today);
   }
 
   // Keep offline pins until their terminal returns, and keep each pending until
@@ -781,6 +824,93 @@ export default class Agents extends View {
     return value;
   }
 
+  // Clickable spots over the wall, at the places sceneLayout() gives the drawing.
+  sceneSpots(sz, everyone, o) {
+    const Lo = sceneLayout(sz.width, sz.height);
+    const spot = (id, x, y, w, h, tip, act) => div().id(id).absolute().left(x).top(y).w(w).h(h).cursor_pointer().tooltip(tip)
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => { cx.stop_propagation(); act(cx); });
+    const word = { working: "at work", blocked: "needs you", done: "shipped", idle: "quiet" };
+    const out = [];
+    Lo.buildings.forEach((b, k) => {
+      const sp = o.spaces[k];
+      if (sp) out.push(spot(`bld-${sp.id}`, b.x, b.y - 4, b.w, b.h + 4, `${sp.name} · ${word[sp.status] ?? "quiet"}${sp.active ? " · you are here" : " · click to go there"}`,
+        () => run("space.select", { id: sp.id })));
+    });
+    const openToday = () => openOverlay({ mod: "company-agents", kind: "popup", width: 300, height: 214, props: { today: true } });
+    out.push(spot("wall-clock", Lo.cx - Lo.rr, Lo.cy - Lo.rr, Lo.rr * 2, Lo.rr * 2, "Today: tasks shipped, time at work, busiest floor", openToday));
+    if (!Lo.sign && o.needYou > 0) out.push(spot("wall-badge", Lo.cx + Lo.rr - 6, Lo.cy + Lo.rr - 8, 12, 10,
+      `${o.needYou} ${o.needYou > 1 ? "agents need" : "agent needs"} you · click to see who`, () => this.openNeedsYou()));
+    if (Lo.sign) out.push(spot("wall-sign", Lo.sign.x, Lo.sign.y, Lo.sign.w, Lo.sign.h,
+      o.needYou ? `${o.needYou} ${o.needYou > 1 ? "agents need" : "agent needs"} you · click to see who` : "Nobody needs you right now", () => this.openNeedsYou()));
+    out.push(spot("wall-rack", Lo.rackX, Lo.rackTop, Lo.rackCab, Lo.base - Lo.rackTop,
+      o.load ? `${o.load} running across the office (sub-agents and shell jobs) · click for the list` : "Nothing running in the background · click for the list", () => this.openWorkload()));
+    const done = everyone.filter((a) => a.status === "done" && !this.settled.has(a.address));
+    out.push(spot("wall-cooler", Lo.cooler.x, Lo.cooler.y, Lo.cooler.w, Lo.cooler.h,
+      done.length ? `Break room: send ${done.length} finished staff on a break` : "Break room: nobody has finished a task", (cx) => {
+        for (const a of done) this.settled.add(a.address);
+        try { localStorage.setItem("settled", JSON.stringify([...this.settled])); } catch { /* storage disabled: settled until restart */ }
+        cx.notify();
+      }));
+    out.push(spot("wall-plant", Lo.plant.x, Lo.plant.y, Lo.plant.w, Lo.plant.h,
+      `${o.shipped} task${o.shipped === 1 ? "" : "s"} shipped today${o.droop ? " · drooping: someone has waited on you for over 5 minutes" : ""}`, openToday));
+    return out;
+  }
+
+  openWorkload() {
+    const act = activityAll(terminals());
+    const n = agents().filter((a) => { const x = act.get(a.address); return x && (x.interns.length || x.jobs); }).length;
+    openOverlay({ mod: "company-agents", kind: "popup", width: 340, height: Math.min(440, Math.max(150, 52 + n * 56)), props: { workload: true } });
+  }
+
+  // The rack's list: every desk with sub-agents or shell jobs running, busiest first; a click shows that agent.
+  workloadView(t) {
+    const act = activityAll(terminals());
+    const load = (x) => x.interns.length + x.jobs;
+    const rows = agents().map((a) => ({ a, x: act.get(a.address) })).filter(({ x }) => x && load(x) > 0).sort((p, q) => load(q.x) - load(p.x));
+    const total = rows.reduce((n, { x }) => n + load(x), 0);
+    const mono = "JetBrains Mono";
+    const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+    return v_flex().w_full().p(6).bg(t.popover).overflow_y_scrollbar()
+      .child(h_flex().px(6).pt(2).pb(6).gap(8).items_center()
+        .child(div().font_family(mono).font_bold().text_size(10).text_color("#a6e3a1").child("SERVER RACK"))
+        .when(rows.length > 0, (el) => el.child(div().text_size(10).text_color(t.dim).child(`${total} running · busiest first`))))
+      .when(rows.length === 0, (el) => el.child(div().px(10).py(18).text_size(12).text_color(t.dim).child("Quiet: no sub-agents or shell jobs running.")))
+      .children(rows.map(({ a, x }) => {
+        const parts = [x.interns.length ? plural(x.interns.length, "sub-agent") : null, x.jobs ? `${plural(x.jobs, "shell job")}${x.long ? ` (${x.long} over a minute)` : ""}` : null].filter(Boolean).join(" · ");
+        return h_flex().id(`wl-${a.address}`).h(52).px(6).gap(8).rounded(8).items_center().cursor_pointer().hover((st) => st.bg(t.hover))
+          .on_click(() => { run("agent.focus", { terminal: a.address }); closeOverlay(props().overlay); })
+          .child(div().flex_none().child(figureFor(a.space_name, a.status, 34, 0, speciesOf(progOf(a)))))
+          .child(v_flex().flex_1().min_w(0).gap(1)
+            .child(div().truncate().text_size(12.5).text_color(t.foreground).child([a.space_name, a.program?.name].filter(Boolean).join(" · ")))
+            .child(div().truncate().text_size(10.5).text_color(t.muted).child(parts)))
+          .child(div().flex_none().text_size(14).text_color("#89b4fa").child("→"));
+      }));
+  }
+
+  // The clock's summary of the day.
+  todayView(t) {
+    const raw = shared("pixel-hq.today");
+    const d = raw && raw.day === dayKey() ? raw : freshDay();
+    const top = Object.entries(d.bySpace ?? {}).sort((p, q) => q[1] - p[1])[0];
+    const list = agents();
+    const mono = "JetBrains Mono";
+    const hm = (ms) => { const m = Math.round(ms / 60000); return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`; };
+    const day = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][new Date().getDay()];
+    const line = (label, value) => h_flex().justify_between().px(10).py(5)
+      .child(div().text_size(12).text_color(t.muted).child(label))
+      .child(div().text_size(12.5).font_family(mono).text_color(t.foreground).child(value));
+    return v_flex().w_full().p(6).bg(t.popover)
+      .child(h_flex().px(6).pt(2).pb(6).gap(8).items_center()
+        .child(div().font_family(mono).font_bold().text_size(10).text_color("#f9e2af").child("TODAY"))
+        .child(div().text_size(10).text_color(t.dim).child(`${day} ${d.day}`)))
+      .child(line("Tasks shipped", String(d.shipped)))
+      .child(line("Time agents worked", hm(d.workMs)))
+      .child(line("Busiest floor", top ? `${top[0]} · ${hm(top[1])}` : "none yet"))
+      .child(line("Working now", String(list.filter((a) => a.status === "working").length)))
+      .child(line("Waiting on you", String(list.filter((a) => a.status === "blocked").length)));
+  }
+
   openNeedsYou() {
     const n = agents().filter((a) => a.status === "blocked").length;
     openOverlay({ mod: "company-agents", kind: "popup", width: 340, height: Math.min(440, Math.max(150, 52 + n * 56)), props: { needsYou: true } });
@@ -1117,6 +1247,8 @@ export default class Agents extends View {
     const t = theme();
     if (props()?.sortMenu) return this.sortMenu(t);
     if (props()?.needsYou) return this.needsYou(t);
+    if (props()?.workload) return this.workloadView(t);
+    if (props()?.today) return this.todayView(t);
     if (this.editor) return this.editor.render(cx);
     const dismissed = shared("pixel-hq.dismissed-version") || localStorage.getItem("upd-dismissed");
     if (this.update && dismissed === String(this.update.version)) {
@@ -1125,6 +1257,7 @@ export default class Agents extends View {
     const collapsed = narrow();
     const sort = sortOf();
     let list = agents();
+    const everyone = list;
     const blockedAll = list.filter((a) => a.status === "blocked");
     let settleDirty = false;
     for (const a of list) if ((a.status === "working" || a.status === "blocked") && this.settled.delete(a.address)) settleDirty = true;
@@ -1234,20 +1367,7 @@ export default class Agents extends View {
         effort: (isClaude ? labels["claude.effort"] || labels["agent.effort"] : labels["agent.effort"]) || null,
       }]];
     }));
-    // How much is going on at each desk. Interns: Hermes' running sub-agents (agent.threads, from its plugin) and, for any
-    // agent, the live child terminals it started with `hc run` (each in its own species and mood). Server rack: Hermes'
-    // shell work (agent.jobs: commands in flight plus background processes; agent.jobs_long: those past a minute).
-    const activityOf = new Map(all.map((k) => {
-      const labels = k.labels ?? {};
-      const n = (v) => { const x = Number.parseInt(v, 10); return Number.isFinite(x) && x > 0 ? x : 0; };
-      const hermes = progOf(k).toLowerCase() === "hermes";
-      const kids = all.filter((c) => c.parent === k.address && c.state === "live");
-      const interns = [
-        ...Array.from({ length: hermes ? Math.min(n(labels["agent.threads"]), 50) : 0 }, () => ({ status: "working", species: speciesOf("hermes") })),
-        ...kids.map((c) => ({ status: String(c.status?.state ?? c.status ?? "idle"), species: speciesOf(progOf(c)) })),
-      ];
-      return [k.address, { interns, jobs: hermes ? n(labels["agent.jobs"]) : 0, long: hermes ? n(labels["agent.jobs_long"]) : 0 }];
-    }));
+    const activityOf = activityAll(all);
     for (const [addr, c] of this.ctxRead) {
       const prev = contextOf.get(addr);
       contextOf.set(addr, {
@@ -1593,6 +1713,18 @@ export default class Agents extends View {
           .loop("opacity", { from: 0.1, to: 1, period: 700 + (k % 4) * 140, easing: "ease-in-out" }));
       }
     }
+    // The wall shows the whole company: the time of day, a building per space, who needs you, the office's load, work shipped today.
+    const todayNow = this.today?.day === dayKey() ? this.today : freshDay();
+    const officeLoad = everyone.reduce((n, a) => { const x = activityOf.get(a.address); return n + (x ? x.interns.length + x.jobs : 0); }, 0);
+    const sceneOpts = {
+      music: Boolean(shared("pixel-hq.music")?.playing),
+      now: new Date(),
+      spaces: spaces().map((sp) => ({ id: sp.id, name: sp.name, status: sp.status, active: sp.active })),
+      needYou: blockedAll.length,
+      load: officeLoad,
+      shipped: todayNow.shipped,
+      droop: blockedAll.some((a) => this.waitOf(a.address, a.status, now) >= 300000),
+    };
     const farm = div().id("farm-area").relative().flex_1().min_h(0).overflow_hidden()
       .on_mouse_move((e, cx) => {
         const d = this.drag;
@@ -1609,7 +1741,8 @@ export default class Agents extends View {
       .on_size_change((s, cx) => {
         if (!this.size || Math.abs(s.width - this.size.width) > 2 || Math.abs(s.height - this.size.height) > 2) { this.size = s; cx.notify(); }
       })
-      .child(scene(sz.width, sz.height, Boolean(shared("pixel-hq.music")?.playing)))
+      .child(scene(sz.width, sz.height, sceneOpts))
+      .children(this.sceneSpots(sz, everyone, sceneOpts))
       .when(Math.max(64, Math.min(110, Math.round(sz.width * 0.27 / 4) * 4)) >= 64, (el) => {
         const m = shared("pixel-hq.music");
         const isPlaying = Boolean(m?.playing);
