@@ -1,6 +1,6 @@
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, panes, focused, agents, theme, run, window, keys, setBadge, openOverlay, shared, setShared, appHome, exec, checking, settings, readTextFile, writeTextFile, notify } from "herdr";
+import { spaces, panes, focused, agents, theme, run, window, keys, setBadge, openOverlay, shared, setShared, appHome, exec, checking, settings, readTextFile, writeTextFile } from "herdr";
 
 const MONO = "JetBrains Mono, Menlo, monospace";
 
@@ -35,15 +35,6 @@ async function ensureMusicHotkey(cx) {
 function hideMusicBox(cx) {
   try { localStorage.setItem("pixel-hq.musicbox.hidden", "true"); } catch {}
   setShared("pixel-hq.musicbox.hidden", true);
-  try {
-    notify({
-      title: "Pixel MusicBox đã ẩn",
-      body: "Bấm Ctrl + Shift + M hoặc click đài Radio trên sàn làm việc để bật lại.",
-      level: "info",
-      timeout: 6000,
-      action: { name: "mod.open", args: { name: "company-music" } }
-    });
-  } catch {}
   cx.notify();
 }
 

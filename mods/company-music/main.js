@@ -1,6 +1,6 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { theme, run, shared, setShared, closeOverlay, checking, appHome, exec, window, props, readTextFile, writeTextFile, notify, settings } from "herdr";
+import { theme, run, shared, setShared, closeOverlay, checking, appHome, exec, window, props, readTextFile, writeTextFile, settings } from "herdr";
 
 const MONO = "JetBrains Mono, Menlo, monospace";
 
@@ -997,21 +997,8 @@ export default class CompanyMusic extends View {
                     try {
                       if (nextVal) {
                         localStorage.setItem("pixel-hq.musicbox.hidden", "true");
-                        notify({
-                          title: "Pixel MusicBox đã ẩn khỏi status bar",
-                          body: "Bấm Ctrl + Shift + M hoặc click đài Radio trên sàn làm việc để bật lại.",
-                          level: "info",
-                          timeout: 6000,
-                          action: { name: "mod.open", args: { name: "company-music" } }
-                        });
                       } else {
                         localStorage.removeItem("pixel-hq.musicbox.hidden");
-                        notify({
-                          title: "Pixel MusicBox đã hiện lại",
-                          body: "Nút MusicBox đã được đưa trở lại thanh trạng thái.",
-                          level: "success",
-                          timeout: 3000
-                        });
                       }
                     } catch {}
                     setShared("pixel-hq.musicbox.hidden", nextVal);
@@ -1050,7 +1037,7 @@ export default class CompanyMusic extends View {
             .items_center()
             .gap(6)
             .child(div().text_size(11).child("💡"))
-            .child(div().text_size(10.5).text_color("#f9e2af").child("MusicBox hiện đang ẩn khỏi thanh trạng thái. Nhấn nút bên trên để hiển thị lại bất cứ lúc nào."))
+            .child(div().text_size(10.5).text_color("#f9e2af").child("Đã ẩn MusicBox, bạn có thể bật lại bằng Ctrl + Shift + M"))
         )
       )
       .child(
