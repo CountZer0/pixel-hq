@@ -4,6 +4,36 @@ import { theme, run, shared, setShared, closeOverlay, checking, appHome, exec, w
 
 const MONO = "JetBrains Mono, Menlo, monospace";
 
+let detectedPythonBin = null;
+
+async function getPythonBin() {
+  if (detectedPythonBin) return detectedPythonBin;
+  const script = `${appHome()}/mods/company-music/player.py`;
+  const isWin = window()?.platform === "windows" || appHome().includes(":") || appHome().includes("\\");
+  const candidates = isWin ? ["python", "py", "python3"] : ["python3", "python"];
+  for (const bin of candidates) {
+    const r = await exec(bin, [script, "check"], { timeout: 4000 }).catch(() => null);
+    if (r?.stdout && r.stdout.includes('"status"')) {
+      detectedPythonBin = bin;
+      return bin;
+    }
+  }
+  detectedPythonBin = candidates[0];
+  return detectedPythonBin;
+}
+
+async function runPlayer(args, timeout = 15000) {
+  const bin = await getPythonBin();
+  const script = `${appHome()}/mods/company-music/player.py`;
+  const r = await exec(bin, [script, ...args], { timeout }).catch(() => null);
+  if (!r?.stdout) return null;
+  try {
+    return JSON.parse(r.stdout.trim().split("\n").pop());
+  } catch {
+    return null;
+  }
+}
+
 function formatTime(seconds) {
   if (!seconds || isNaN(seconds) || seconds < 0) return "00:00";
   const s = Math.floor(seconds);
@@ -35,6 +65,10 @@ export default class CompanyMusic extends View {
     this.installMsg = null;
     this.installSuccess = null;
     this.history = shared("pixel-hq.music")?.history || [];
+    const curMusic = shared("pixel-hq.music");
+    if (curMusic?.error && curMusic.status !== "error") {
+      setShared("pixel-hq.music", { ...curMusic, error: null });
+    }
 
     this.urlInput = InputState.new({ placeholder: "Paste YouTube, SoundCloud, or direct audio stream URL..." });
     this.urlInput.on("submit", (_e, cx) => this.play(this.urlInput.value(), null, cx));
@@ -58,71 +92,51 @@ export default class CompanyMusic extends View {
     cx.timer.after(150, () => this.urlInput.focus());
     this.checkDeps(cx);
     this.loadHistory(cx);
+    this.syncStatus(cx);
 
     cx.timer.every(1000, (cx) => {
       const music = shared("pixel-hq.music");
       if (music?.playing) cx.notify();
     });
 
-    cx.timer.every(2000, async (cx) => {
+    cx.timer.every(2000, (cx) => {
       const music = shared("pixel-hq.music");
       if (music?.status !== "buffering" && !music?.playing) return;
-      const script = `${appHome()}/mods/company-music/player.py`;
-      const candidates = window()?.platform === "windows" ? ["pythonw", "python", "python3", "py"] : ["python3", "python"];
-      for (const bin of candidates) {
-        const r = await exec(bin, [script, "status"], { timeout: 15000 }).catch(() => null);
-        if (!r?.stdout) continue;
-        try {
-          const res = JSON.parse(r.stdout.trim().split("\n").pop());
-          if (Array.isArray(res?.history)) {
-            this.history = res.history;
-          }
-          if (res.status === "playing" || res.status === "error" || res.status === "idle") {
-            this.busy = false;
-            setShared("pixel-hq.music", res);
-            cx.notify();
-          }
-          break;
-        } catch {}
-      }
+      this.syncStatus(cx);
     });
   }
 
-  async checkDeps(cx) {
-    const script = `${appHome()}/mods/company-music/player.py`;
-    const candidates = window()?.platform === "windows" ? ["pythonw", "python", "python3", "py"] : ["python3", "python"];
-    for (const bin of candidates) {
-      const r = await exec(bin, [script, "check"], { timeout: 4000 }).catch(() => null);
-      if (!r?.stdout) continue;
-      try {
-        const res = JSON.parse(r.stdout.trim().split("\n").pop());
-        this.depStatus = res;
-        this.showGuide = !res.has_player;
-        if (res.has_player) {
-          this.installing = false;
-          this.installMsg = null;
-          setShared("pixel-hq.music-setup", { installing: false, msg: null });
-        }
-        if (cx) cx.notify();
-        break;
-      } catch {}
+  async syncStatus(cx) {
+    const res = await runPlayer(["status"], 15000);
+    if (!res) return;
+    if (Array.isArray(res.history)) {
+      this.history = res.history;
     }
+    if (res.status === "playing" || res.status === "error" || res.status === "idle") {
+      this.busy = false;
+    }
+    setShared("pixel-hq.music", res);
+    if (cx) cx.notify();
+  }
+
+  async checkDeps(cx) {
+    const res = await runPlayer(["check"], 4000);
+    if (!res) return;
+    this.depStatus = res;
+    this.showGuide = !res.has_player;
+    if (res.has_player) {
+      this.installing = false;
+      this.installMsg = null;
+      setShared("pixel-hq.music-setup", { installing: false, msg: null });
+    }
+    if (cx) cx.notify();
   }
 
   async loadHistory(cx) {
-    const script = `${appHome()}/mods/company-music/player.py`;
-    const candidates = window()?.platform === "windows" ? ["pythonw", "python", "python3", "py"] : ["python3", "python"];
-    for (const bin of candidates) {
-      const r = await exec(bin, [script, "history"], { timeout: 3000 }).catch(() => null);
-      if (!r?.stdout) continue;
-      try {
-        const res = JSON.parse(r.stdout.trim().split("\n").pop());
-        if (Array.isArray(res?.history)) {
-          this.history = res.history;
-          if (cx) cx.notify();
-        }
-        break;
-      } catch {}
+    const res = await runPlayer(["history"], 4000);
+    if (Array.isArray(res?.history)) {
+      this.history = res.history;
+      if (cx) cx.notify();
     }
   }
 
@@ -131,12 +145,7 @@ export default class CompanyMusic extends View {
     const cur = shared("pixel-hq.music") || {};
     setShared("pixel-hq.music", { ...cur, history: [] });
     if (cx) cx.notify();
-    const script = `${appHome()}/mods/company-music/player.py`;
-    const candidates = window()?.platform === "windows" ? ["pythonw", "python", "python3", "py"] : ["python3", "python"];
-    for (const bin of candidates) {
-      const r = await exec(bin, [script, "clear-history"], { timeout: 3000 }).catch(() => null);
-      if (r?.stdout) break;
-    }
+    await runPlayer(["clear-history"], 4000);
   }
 
   async openTerminal(targetOs, cx) {
@@ -339,139 +348,120 @@ export default class CompanyMusic extends View {
     this.busy = true;
     this.error = null;
 
+    const curMusic = shared("pixel-hq.music") || {};
+    const safeTitle = presetTitle ? presetTitle.replace(/["\r\n\\|]/g, " ").trim() : null;
+    const isExt = cleanUrl.includes("youtu") || cleanUrl.includes("soundcloud") || cleanUrl.includes("list=");
+    const finalTitle = isExt ? null : safeTitle;
+
     setShared("pixel-hq.music", {
+      ...curMusic,
       playing: false,
       status: "buffering",
-      title: presetTitle || "Buffering stream...",
+      title: safeTitle || "Buffering stream...",
       url: cleanUrl,
-      source: "direct"
+      error: null,
+      history: this.history && this.history.length > 0 ? this.history : (curMusic.history || [])
     });
     cx.notify();
 
-    const script = `${appHome()}/mods/company-music/player.py`;
-    const candidates = window()?.platform === "windows" ? ["pythonw", "python", "python3", "py"] : ["python3", "python"];
-    const args = presetTitle ? [script, "play", cleanUrl, presetTitle] : [script, "play", cleanUrl];
+    const args = finalTitle ? ["play", cleanUrl, finalTitle] : ["play", cleanUrl];
 
     let res = null;
-    for (const bin of candidates) {
-      const r = await exec(bin, args, { timeout: 35000 }).catch(() => null);
-      if (!r?.stdout) continue;
-      try {
-        res = JSON.parse(r.stdout.trim().split("\n").pop());
-        break;
-      } catch {}
-    }
+    try {
+      res = await runPlayer(args, 35000);
 
-    this.busy = false;
-    if (res?.status === "error") {
-      this.error = res.error;
-      setShared("pixel-hq.music", {
-        playing: false,
-        status: "error",
-        title: "",
-        url: cleanUrl,
-        error: res.error,
-        source: "direct"
-      });
-      if (res.error.includes("Neither ffplay nor mpv found")) {
-        this.showGuide = true;
-      }
-    } else if (res) {
-      this.error = null;
-      if (Array.isArray(res.history)) {
-        this.history = res.history;
+      if (res?.status === "error") {
+        this.error = res.error;
+        setShared("pixel-hq.music", {
+          ...curMusic,
+          playing: false,
+          status: "error",
+          title: "",
+          url: cleanUrl,
+          error: res.error,
+          source: "direct",
+          history: this.history && this.history.length > 0 ? this.history : (curMusic.history || [])
+        });
+        if (res.error.includes("Neither ffplay nor mpv found")) {
+          this.showGuide = true;
+        }
+      } else if (res) {
+        this.error = null;
+        if (Array.isArray(res.history)) {
+          this.history = res.history;
+        } else {
+          this.loadHistory(cx);
+        }
+        setShared("pixel-hq.music", {
+          ...res,
+          history: Array.isArray(res.history) ? res.history : (this.history || curMusic.history || [])
+        });
       } else {
-        this.loadHistory(cx);
+        this.error = "Could not start audio player. Verify Python, ffplay or mpv is installed.";
+        setShared("pixel-hq.music", {
+          ...curMusic,
+          playing: false,
+          status: "error",
+          title: "",
+          url: cleanUrl,
+          error: this.error,
+          source: "direct",
+          history: this.history && this.history.length > 0 ? this.history : (curMusic.history || [])
+        });
       }
-      setShared("pixel-hq.music", res);
-    } else {
-      this.error = "Could not start audio player. Verify Python, ffplay or mpv is installed.";
-      setShared("pixel-hq.music", {
-        playing: false,
-        status: "error",
-        title: "",
-        url: cleanUrl,
-        error: this.error,
-        source: "direct"
-      });
+    } finally {
+      this.busy = false;
+      if (cx) cx.notify();
     }
-    cx.notify();
   }
 
   async pause(cx) {
-    const script = `${appHome()}/mods/company-music/player.py`;
-    const candidates = window()?.platform === "windows" ? ["pythonw", "python", "python3", "py"] : ["python3", "python"];
-    for (const bin of candidates) {
-      const r = await exec(bin, [script, "pause"], { timeout: 4000 }).catch(() => null);
-      if (!r?.stdout) continue;
-      try {
-        const res = JSON.parse(r.stdout.trim().split("\n").pop());
-        setShared("pixel-hq.music", res);
-        break;
-      } catch {}
-    }
+    const res = await runPlayer(["pause"], 4000);
+    if (res) setShared("pixel-hq.music", res);
     cx.notify();
   }
 
   async resume(cx) {
-    const script = `${appHome()}/mods/company-music/player.py`;
-    const candidates = window()?.platform === "windows" ? ["pythonw", "python", "python3", "py"] : ["python3", "python"];
-    for (const bin of candidates) {
-      const r = await exec(bin, [script, "resume"], { timeout: 4000 }).catch(() => null);
-      if (!r?.stdout) continue;
-      try {
-        const res = JSON.parse(r.stdout.trim().split("\n").pop());
-        setShared("pixel-hq.music", res);
-        break;
-      } catch {}
-    }
+    const res = await runPlayer(["resume"], 4000);
+    if (res) setShared("pixel-hq.music", res);
     cx.notify();
   }
 
   async stop(cx) {
-    const script = `${appHome()}/mods/company-music/player.py`;
-    const candidates = window()?.platform === "windows" ? ["pythonw", "python", "python3", "py"] : ["python3", "python"];
-    for (const bin of candidates) {
-      const r = await exec(bin, [script, "stop"], { timeout: 4000 }).catch(() => null);
-      if (!r?.stdout) continue;
-      try {
-        const res = JSON.parse(r.stdout.trim().split("\n").pop());
-        setShared("pixel-hq.music", res);
-        break;
-      } catch {}
+    if (this.actionBusy) return;
+    this.actionBusy = true;
+    try {
+      const res = await runPlayer(["stop"], 4000);
+      if (res) setShared("pixel-hq.music", res);
+      this.error = null;
+      if (cx) cx.notify();
+    } finally {
+      this.actionBusy = false;
     }
-    this.error = null;
-    cx.notify();
   }
 
   async next(cx) {
-    const script = `${appHome()}/mods/company-music/player.py`;
-    const candidates = window()?.platform === "windows" ? ["pythonw", "python", "python3", "py"] : ["python3", "python"];
-    for (const bin of candidates) {
-      const r = await exec(bin, [script, "next"], { timeout: 15000 }).catch(() => null);
-      if (!r?.stdout) continue;
-      try {
-        const res = JSON.parse(r.stdout.trim().split("\n").pop());
-        setShared("pixel-hq.music", res);
-        break;
-      } catch {}
+    if (this.actionBusy) return;
+    this.actionBusy = true;
+    try {
+      const res = await runPlayer(["next"], 20000);
+      if (res) setShared("pixel-hq.music", res);
+      if (cx) cx.notify();
+    } finally {
+      this.actionBusy = false;
     }
-    if (cx) cx.notify();
   }
 
   async prev(cx) {
-    const script = `${appHome()}/mods/company-music/player.py`;
-    const candidates = window()?.platform === "windows" ? ["pythonw", "python", "python3", "py"] : ["python3", "python"];
-    for (const bin of candidates) {
-      const r = await exec(bin, [script, "prev"], { timeout: 15000 }).catch(() => null);
-      if (!r?.stdout) continue;
-      try {
-        const res = JSON.parse(r.stdout.trim().split("\n").pop());
-        setShared("pixel-hq.music", res);
-        break;
-      } catch {}
+    if (this.actionBusy) return;
+    this.actionBusy = true;
+    try {
+      const res = await runPlayer(["prev"], 20000);
+      if (res) setShared("pixel-hq.music", res);
+      if (cx) cx.notify();
+    } finally {
+      this.actionBusy = false;
     }
-    if (cx) cx.notify();
   }
 
   renderSetupGuide(t) {
@@ -841,8 +831,10 @@ export default class CompanyMusic extends View {
     const currentTitle = music.title || (isPlaying ? "Audio Stream" : "No stream playing");
 
     const nowSec = Math.floor(Date.now() / 1000);
-    const baseElapsed = Number(music.elapsed || music.currentElapsed || 0);
-    const liveElapsed = isPlaying && music.startTime ? baseElapsed + Math.max(0, nowSec - music.startTime) : (music.currentElapsed || baseElapsed);
+    const pauseElapsed = Number(music.elapsed || 0);
+    const liveElapsed = isPlaying && music.startTime
+      ? pauseElapsed + Math.max(0, nowSec - music.startTime)
+      : Number(music.currentElapsed || pauseElapsed);
     const dur = Number(music.duration || 0);
     const percent = dur > 0 ? Math.min(100, Math.max(0, Math.round((liveElapsed / dur) * 100))) : 0;
 
@@ -1364,7 +1356,8 @@ export default class CompanyMusic extends View {
                   .hover((s) => s.border_color("#89b4fa"))
                   .on_click((_e, cx) => {
                     this.urlInput.set_value(h.url);
-                    this.play(h.url, h.title, cx);
+                    const isMedia = h.type === "playlist" || h.type === "youtube" || h.type === "soundcloud";
+                    this.play(h.url, isMedia ? null : h.title, cx);
                   })
                   .child(
                     h_flex()

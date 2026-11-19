@@ -1,5 +1,5 @@
 {
-  "version": "1.7.6",
+  "version": "1.7.7",
   "type": "urgent",
-  "notes": "Fix audio auto-advance, instant track start, and macOS playback"
+  "notes": "Fix single-track skip/prev, modal timer double-counting, clean stop, and fix Codex config reader"
 }
