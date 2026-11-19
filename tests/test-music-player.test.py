@@ -296,6 +296,10 @@ def test_9_playlist_queue_and_auto_advance():
             assert player.read_queue()["current_index"] == 0
 
             time.sleep(0.05)
+            st_sim = player.read_state()
+            st_sim["startTime"] = int(time.time()) - 25
+            st_sim["duration"] = 20
+            player.write_state(st_sim)
             auto_res = player.cmd_status()
             assert auto_res["status"] == "playing"
             assert "[2/6]" in auto_res["title"]
@@ -430,19 +434,190 @@ def test_11_playback_progress_counter():
             player.STATE_FILE = orig_state
     print("PASS: Test 11 - Playback Progress Counter & Time Tracking verified")
 
+def test_12_premature_exit_rejection_vs_completion():
+    print("=== Test 12: Premature Exit Rejection vs Natural Completion ===")
+    with tempfile.TemporaryDirectory() as td:
+        orig_cache = player.CACHE_DIR
+        orig_state = player.STATE_FILE
+        orig_queue = player.QUEUE_FILE
+        orig_prefetch = player.PREFETCH_PID_FILE
+        player.CACHE_DIR = td
+        player.STATE_FILE = os.path.join(td, "state.json")
+        player.QUEUE_FILE = os.path.join(td, "queue.json")
+        player.PREFETCH_PID_FILE = os.path.join(td, "prefetch.pid")
+
+        mock_player = os.path.join(td, "mock_player.sh")
+        with open(mock_player, "w") as f:
+            f.write("#!/bin/sh\nexit 0\n")
+        os.chmod(mock_player, 0o755)
+
+        orig_find_player = player.find_player_bin
+        orig_extract = player.extract_stream_info
+        player.find_player_bin = lambda: mock_player
+        player.extract_stream_info = lambda u: ("Resolved Track", f"https://resolved", 200, None)
+
+        try:
+            player.write_queue({
+                "playlist_url": "https://www.youtube.com/watch?v=v1&list=PL1",
+                "current_index": 0,
+                "items": [
+                    {"id": "v1", "title": "Track 1", "url": "https://www.youtube.com/watch?v=v1", "stream_url": "https://s1", "resolved_at": int(time.time()), "duration": 200},
+                    {"id": "v2", "title": "Track 2", "url": "https://www.youtube.com/watch?v=v2", "stream_url": "https://s2", "resolved_at": int(time.time()), "duration": 200},
+                    {"id": "v3", "title": "Track 3", "url": "https://www.youtube.com/watch?v=v3", "stream_url": "https://s3", "resolved_at": int(time.time()), "duration": 200},
+                ]
+            })
+
+            res0 = player.cmd_play_queue_index(0)
+            assert res0["status"] == "playing"
+            assert "[1/3]" in res0["title"]
+
+            time.sleep(0.05)
+            st = player.read_state()
+            st["startTime"] = int(time.time()) - 2
+            st["duration"] = 200
+            player.write_state(st)
+
+            res_status = player.cmd_status()
+            q_after = player.read_queue()
+            if q_after:
+                assert q_after["current_index"] == 0
+                assert "[2/3]" not in str(res_status.get("title", ""))
+
+            res_status2 = player.cmd_status()
+            assert res_status2["status"] == "idle"
+
+            player.write_queue({
+                "playlist_url": "https://www.youtube.com/watch?v=v1&list=PL1",
+                "current_index": 0,
+                "items": [
+                    {"id": "v1", "title": "Track 1", "url": "https://www.youtube.com/watch?v=v1", "stream_url": "https://s1", "resolved_at": int(time.time()), "duration": 200},
+                    {"id": "v2", "title": "Track 2", "url": "https://www.youtube.com/watch?v=v2", "stream_url": "https://s2", "resolved_at": int(time.time()), "duration": 200},
+                ]
+            })
+            player.cmd_play_queue_index(0)
+            time.sleep(0.05)
+            st_done = player.read_state()
+            st_done["startTime"] = int(time.time()) - 190
+            st_done["duration"] = 200
+            player.write_state(st_done)
+
+            res_advance = player.cmd_status()
+            assert res_advance["status"] == "playing"
+            assert "[2/2]" in res_advance["title"]
+            assert player.read_queue()["current_index"] == 1
+        finally:
+            player.find_player_bin = orig_find_player
+            player.extract_stream_info = orig_extract
+            player.CACHE_DIR = orig_cache
+            player.STATE_FILE = orig_state
+            player.QUEUE_FILE = orig_queue
+            player.PREFETCH_PID_FILE = orig_prefetch
+    print("PASS: Test 12 - Premature exit rejected and natural completion auto-advanced cleanly")
+
+def test_13_single_track_navigation_boundary():
+    print("=== Test 13: Single-Track Next/Prev Navigation & Boundary Verification ===")
+    with tempfile.TemporaryDirectory() as td:
+        orig_cache = player.CACHE_DIR
+        orig_state = player.STATE_FILE
+        orig_queue = player.QUEUE_FILE
+        orig_prefetch = player.PREFETCH_PID_FILE
+        player.CACHE_DIR = td
+        player.STATE_FILE = os.path.join(td, "state.json")
+        player.QUEUE_FILE = os.path.join(td, "queue.json")
+        player.PREFETCH_PID_FILE = os.path.join(td, "prefetch.pid")
+
+        mock_player = os.path.join(td, "mock_player.sh")
+        with open(mock_player, "w") as f:
+            f.write("#!/bin/sh\nsleep 10\n")
+        os.chmod(mock_player, 0o755)
+
+        orig_find_player = player.find_player_bin
+        orig_extract = player.extract_stream_info
+        player.find_player_bin = lambda: mock_player
+        player.extract_stream_info = lambda u: ("Resolved Track", f"https://resolved", 200, None)
+
+        try:
+            player.write_queue({
+                "playlist_url": "https://www.youtube.com/watch?v=v1&list=PL1",
+                "current_index": 0,
+                "items": [
+                    {"id": "v1", "title": "Track 1", "url": "https://www.youtube.com/watch?v=v1", "stream_url": "https://s1", "resolved_at": int(time.time()), "duration": 200},
+                    {"id": "v2", "title": "Track 2", "url": "https://www.youtube.com/watch?v=v2", "stream_url": "https://s2", "resolved_at": int(time.time()), "duration": 200},
+                    {"id": "v3", "title": "Track 3", "url": "https://www.youtube.com/watch?v=v3", "stream_url": "https://s3", "resolved_at": int(time.time()), "duration": 200},
+                    {"id": "v4", "title": "Track 4", "url": "https://www.youtube.com/watch?v=v4", "stream_url": "https://s4", "resolved_at": int(time.time()), "duration": 200},
+                ]
+            })
+
+            r0 = player.cmd_play_queue_index(0)
+            assert player.read_queue()["current_index"] == 0
+            assert "[1/4]" in r0["title"]
+
+            r1 = player.cmd_next()
+            assert player.read_queue()["current_index"] == 1
+            assert "[2/4]" in r1["title"]
+
+            r2 = player.cmd_next()
+            assert player.read_queue()["current_index"] == 2
+            assert "[3/4]" in r2["title"]
+
+            r3 = player.cmd_next()
+            assert player.read_queue()["current_index"] == 3
+            assert "[4/4]" in r3["title"]
+
+            r_wrap = player.cmd_next()
+            assert player.read_queue()["current_index"] == 0
+            assert "[1/4]" in r_wrap["title"]
+
+            r_prev_wrap = player.cmd_prev()
+            assert player.read_queue()["current_index"] == 0
+
+            player.cmd_next()
+            player.cmd_next()
+            assert player.read_queue()["current_index"] == 2
+            r_back = player.cmd_prev()
+            assert player.read_queue()["current_index"] == 1
+            assert "[2/4]" in r_back["title"]
+
+            r_back0 = player.cmd_prev()
+            assert player.read_queue()["current_index"] == 0
+            assert "[1/4]" in r_back0["title"]
+        finally:
+            player.find_player_bin = orig_find_player
+            player.extract_stream_info = orig_extract
+            player.CACHE_DIR = orig_cache
+            player.STATE_FILE = orig_state
+            player.QUEUE_FILE = orig_queue
+            player.PREFETCH_PID_FILE = orig_prefetch
+    print("PASS: Test 13 - Single-Track Next/Prev Step Verification & Boundary verified")
+
 def main():
-    test_1_url_validation()
-    test_2_title_derivation()
-    test_3_cache_and_file_permissions()
-    test_4_strict_pid_verification()
-    test_5_pause_and_resume_lifecycle()
-    test_6_stop_while_paused_and_cleanup()
-    test_7_missing_dependency_reporting()
-    test_8_next_prev_cycling()
-    test_9_playlist_queue_and_auto_advance()
-    test_10_recently_played_history()
-    test_11_playback_progress_counter()
-    print("All 11 Music Player unit test suites passed successfully!")
+    suite_td = tempfile.mkdtemp(prefix="pixel_hq_test_cache_")
+    orig_env = os.environ.get("PIXEL_HQ_CACHE_DIR")
+    os.environ["PIXEL_HQ_CACHE_DIR"] = suite_td
+    orig_cache = player.CACHE_DIR
+    player.set_cache_dir(suite_td)
+    try:
+        test_1_url_validation()
+        test_2_title_derivation()
+        test_3_cache_and_file_permissions()
+        test_4_strict_pid_verification()
+        test_5_pause_and_resume_lifecycle()
+        test_6_stop_while_paused_and_cleanup()
+        test_7_missing_dependency_reporting()
+        test_8_next_prev_cycling()
+        test_9_playlist_queue_and_auto_advance()
+        test_10_recently_played_history()
+        test_11_playback_progress_counter()
+        test_12_premature_exit_rejection_vs_completion()
+        test_13_single_track_navigation_boundary()
+        print("All 13 Music Player unit test suites passed successfully!")
+    finally:
+        player.set_cache_dir(orig_cache)
+        if orig_env is not None:
+            os.environ["PIXEL_HQ_CACHE_DIR"] = orig_env
+        else:
+            os.environ.pop("PIXEL_HQ_CACHE_DIR", None)
+        shutil.rmtree(suite_td, ignore_errors=True)
 
 if __name__ == "__main__":
     main()

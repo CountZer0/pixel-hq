@@ -34,11 +34,19 @@ def run_cmd(*args, **kwargs):
 def popen_cmd(*args, **kwargs):
     return subprocess.Popen(*args, **get_subprocess_kwargs(**kwargs))
 
-CACHE_DIR = "/mnt/c/Users/ADMIN/.cache/pixel-hq/music" if (sys.platform != "win32" and os.path.isdir("/mnt/c/Users/ADMIN")) else os.path.expanduser("~/.cache/pixel-hq/music")
+CACHE_DIR = os.environ.get("PIXEL_HQ_CACHE_DIR") or ("/mnt/c/Users/ADMIN/.cache/pixel-hq/music" if (sys.platform != "win32" and os.path.isdir("/mnt/c/Users/ADMIN")) else os.path.expanduser("~/.cache/pixel-hq/music"))
 STATE_FILE = os.path.join(CACHE_DIR, "state.json")
 QUEUE_FILE = os.path.join(CACHE_DIR, "queue.json")
 PREFETCH_PID_FILE = os.path.join(CACHE_DIR, "prefetch.pid")
 HISTORY_FILE = os.path.join(CACHE_DIR, "history.json")
+
+def set_cache_dir(new_dir):
+    global CACHE_DIR, STATE_FILE, QUEUE_FILE, PREFETCH_PID_FILE, HISTORY_FILE
+    CACHE_DIR = new_dir
+    STATE_FILE = os.path.join(CACHE_DIR, "state.json")
+    QUEUE_FILE = os.path.join(CACHE_DIR, "queue.json")
+    PREFETCH_PID_FILE = os.path.join(CACHE_DIR, "prefetch.pid")
+    HISTORY_FILE = os.path.join(CACHE_DIR, "history.json")
 POOL_SIZE = 5
 MAX_HISTORY = 3
 
@@ -1182,7 +1190,7 @@ def cmd_status():
             write_state(current)
             return current
 
-        is_completed = is_expired or (dur == 0) or (dur > 0 and current_elapsed >= max(15, dur * 0.85))
+        is_completed = is_expired or (dur > 0 and current_elapsed >= max(15, dur * 0.85)) or (dur == 0 and current_elapsed >= 15)
 
         queue = read_queue()
         if queue and queue.get("items"):

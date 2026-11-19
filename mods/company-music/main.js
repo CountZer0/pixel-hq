@@ -4,9 +4,34 @@ import { theme, run, shared, setShared, closeOverlay, checking, appHome, exec, w
 
 const MONO = "JetBrains Mono, Menlo, monospace";
 
-function getPythonBins() {
+let detectedPythonBin = null;
+
+async function getPythonBin() {
+  if (detectedPythonBin) return detectedPythonBin;
+  const script = `${appHome()}/mods/company-music/player.py`;
   const isWin = window()?.platform === "windows" || appHome().includes(":") || appHome().includes("\\");
-  return isWin ? ["python", "pythonw", "python3", "py"] : ["python3", "python"];
+  const candidates = isWin ? ["python", "py", "python3"] : ["python3", "python"];
+  for (const bin of candidates) {
+    const r = await exec(bin, [script, "check"], { timeout: 4000 }).catch(() => null);
+    if (r?.stdout && r.stdout.includes('"status"')) {
+      detectedPythonBin = bin;
+      return bin;
+    }
+  }
+  detectedPythonBin = candidates[0];
+  return detectedPythonBin;
+}
+
+async function runPlayer(args, timeout = 15000) {
+  const bin = await getPythonBin();
+  const script = `${appHome()}/mods/company-music/player.py`;
+  const r = await exec(bin, [script, ...args], { timeout }).catch(() => null);
+  if (!r?.stdout) return null;
+  try {
+    return JSON.parse(r.stdout.trim().split("\n").pop());
+  } catch {
+    return null;
+  }
 }
 
 function formatTime(seconds) {
@@ -82,58 +107,36 @@ export default class CompanyMusic extends View {
   }
 
   async syncStatus(cx) {
-    const script = `${appHome()}/mods/company-music/player.py`;
-    for (const bin of getPythonBins()) {
-      const r = await exec(bin, [script, "status"], { timeout: 15000 }).catch(() => null);
-      if (!r?.stdout) continue;
-      try {
-        const res = JSON.parse(r.stdout.trim().split("\n").pop());
-        if (Array.isArray(res?.history)) {
-          this.history = res.history;
-        }
-        if (res.status === "playing" || res.status === "error" || res.status === "idle") {
-          this.busy = false;
-        }
-        setShared("pixel-hq.music", res);
-        if (cx) cx.notify();
-        break;
-      } catch {}
+    const res = await runPlayer(["status"], 15000);
+    if (!res) return;
+    if (Array.isArray(res.history)) {
+      this.history = res.history;
     }
+    if (res.status === "playing" || res.status === "error" || res.status === "idle") {
+      this.busy = false;
+    }
+    setShared("pixel-hq.music", res);
+    if (cx) cx.notify();
   }
 
   async checkDeps(cx) {
-    const script = `${appHome()}/mods/company-music/player.py`;
-    for (const bin of getPythonBins()) {
-      const r = await exec(bin, [script, "check"], { timeout: 4000 }).catch(() => null);
-      if (!r?.stdout) continue;
-      try {
-        const res = JSON.parse(r.stdout.trim().split("\n").pop());
-        this.depStatus = res;
-        this.showGuide = !res.has_player;
-        if (res.has_player) {
-          this.installing = false;
-          this.installMsg = null;
-          setShared("pixel-hq.music-setup", { installing: false, msg: null });
-        }
-        if (cx) cx.notify();
-        break;
-      } catch {}
+    const res = await runPlayer(["check"], 4000);
+    if (!res) return;
+    this.depStatus = res;
+    this.showGuide = !res.has_player;
+    if (res.has_player) {
+      this.installing = false;
+      this.installMsg = null;
+      setShared("pixel-hq.music-setup", { installing: false, msg: null });
     }
+    if (cx) cx.notify();
   }
 
   async loadHistory(cx) {
-    const script = `${appHome()}/mods/company-music/player.py`;
-    for (const bin of getPythonBins()) {
-      const r = await exec(bin, [script, "history"], { timeout: 3000 }).catch(() => null);
-      if (!r?.stdout) continue;
-      try {
-        const res = JSON.parse(r.stdout.trim().split("\n").pop());
-        if (Array.isArray(res?.history)) {
-          this.history = res.history;
-          if (cx) cx.notify();
-        }
-        break;
-      } catch {}
+    const res = await runPlayer(["history"], 4000);
+    if (Array.isArray(res?.history)) {
+      this.history = res.history;
+      if (cx) cx.notify();
     }
   }
 
@@ -142,11 +145,7 @@ export default class CompanyMusic extends View {
     const cur = shared("pixel-hq.music") || {};
     setShared("pixel-hq.music", { ...cur, history: [] });
     if (cx) cx.notify();
-    const script = `${appHome()}/mods/company-music/player.py`;
-    for (const bin of getPythonBins()) {
-      const r = await exec(bin, [script, "clear-history"], { timeout: 3000 }).catch(() => null);
-      if (r?.stdout) break;
-    }
+    await runPlayer(["clear-history"], 4000);
   }
 
   async openTerminal(targetOs, cx) {
@@ -365,19 +364,11 @@ export default class CompanyMusic extends View {
     });
     cx.notify();
 
-    const script = `${appHome()}/mods/company-music/player.py`;
-    const args = finalTitle ? [script, "play", cleanUrl, finalTitle] : [script, "play", cleanUrl];
+    const args = finalTitle ? ["play", cleanUrl, finalTitle] : ["play", cleanUrl];
 
     let res = null;
     try {
-      for (const bin of getPythonBins()) {
-        const r = await exec(bin, args, { timeout: 35000 }).catch(() => null);
-        if (!r?.stdout) continue;
-        try {
-          res = JSON.parse(r.stdout.trim().split("\n").pop());
-          break;
-        } catch {}
-      }
+      res = await runPlayer(args, 35000);
 
       if (res?.status === "error") {
         this.error = res.error;
@@ -425,30 +416,14 @@ export default class CompanyMusic extends View {
   }
 
   async pause(cx) {
-    const script = `${appHome()}/mods/company-music/player.py`;
-    for (const bin of getPythonBins()) {
-      const r = await exec(bin, [script, "pause"], { timeout: 4000 }).catch(() => null);
-      if (!r?.stdout) continue;
-      try {
-        const res = JSON.parse(r.stdout.trim().split("\n").pop());
-        setShared("pixel-hq.music", res);
-        break;
-      } catch {}
-    }
+    const res = await runPlayer(["pause"], 4000);
+    if (res) setShared("pixel-hq.music", res);
     cx.notify();
   }
 
   async resume(cx) {
-    const script = `${appHome()}/mods/company-music/player.py`;
-    for (const bin of getPythonBins()) {
-      const r = await exec(bin, [script, "resume"], { timeout: 4000 }).catch(() => null);
-      if (!r?.stdout) continue;
-      try {
-        const res = JSON.parse(r.stdout.trim().split("\n").pop());
-        setShared("pixel-hq.music", res);
-        break;
-      } catch {}
-    }
+    const res = await runPlayer(["resume"], 4000);
+    if (res) setShared("pixel-hq.music", res);
     cx.notify();
   }
 
@@ -456,16 +431,8 @@ export default class CompanyMusic extends View {
     if (this.actionBusy) return;
     this.actionBusy = true;
     try {
-      const script = `${appHome()}/mods/company-music/player.py`;
-      for (const bin of getPythonBins()) {
-        const r = await exec(bin, [script, "stop"], { timeout: 4000 }).catch(() => null);
-        if (!r?.stdout) continue;
-        try {
-          const res = JSON.parse(r.stdout.trim().split("\n").pop());
-          setShared("pixel-hq.music", res);
-          break;
-        } catch {}
-      }
+      const res = await runPlayer(["stop"], 4000);
+      if (res) setShared("pixel-hq.music", res);
       this.error = null;
       if (cx) cx.notify();
     } finally {
@@ -477,16 +444,8 @@ export default class CompanyMusic extends View {
     if (this.actionBusy) return;
     this.actionBusy = true;
     try {
-      const script = `${appHome()}/mods/company-music/player.py`;
-      for (const bin of getPythonBins()) {
-        const r = await exec(bin, [script, "next"], { timeout: 15000 }).catch(() => null);
-        if (!r?.stdout) continue;
-        try {
-          const res = JSON.parse(r.stdout.trim().split("\n").pop());
-          setShared("pixel-hq.music", res);
-          break;
-        } catch {}
-      }
+      const res = await runPlayer(["next"], 20000);
+      if (res) setShared("pixel-hq.music", res);
       if (cx) cx.notify();
     } finally {
       this.actionBusy = false;
@@ -497,16 +456,8 @@ export default class CompanyMusic extends View {
     if (this.actionBusy) return;
     this.actionBusy = true;
     try {
-      const script = `${appHome()}/mods/company-music/player.py`;
-      for (const bin of getPythonBins()) {
-        const r = await exec(bin, [script, "prev"], { timeout: 15000 }).catch(() => null);
-        if (!r?.stdout) continue;
-        try {
-          const res = JSON.parse(r.stdout.trim().split("\n").pop());
-          setShared("pixel-hq.music", res);
-          break;
-        } catch {}
-      }
+      const res = await runPlayer(["prev"], 20000);
+      if (res) setShared("pixel-hq.music", res);
       if (cx) cx.notify();
     } finally {
       this.actionBusy = false;
@@ -880,8 +831,10 @@ export default class CompanyMusic extends View {
     const currentTitle = music.title || (isPlaying ? "Audio Stream" : "No stream playing");
 
     const nowSec = Math.floor(Date.now() / 1000);
-    const baseElapsed = Number(music.elapsed || music.currentElapsed || 0);
-    const liveElapsed = isPlaying && music.startTime ? baseElapsed + Math.max(0, nowSec - music.startTime) : (music.currentElapsed || baseElapsed);
+    const pauseElapsed = Number(music.elapsed || 0);
+    const liveElapsed = isPlaying && music.startTime
+      ? pauseElapsed + Math.max(0, nowSec - music.startTime)
+      : Number(music.currentElapsed || pauseElapsed);
     const dur = Number(music.duration || 0);
     const percent = dur > 0 ? Math.min(100, Math.max(0, Math.round((liveElapsed / dur) * 100))) : 0;
 

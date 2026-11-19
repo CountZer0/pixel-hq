@@ -4,9 +4,34 @@ import { spaces, panes, focused, agents, theme, run, window, keys, setBadge, ope
 
 const MONO = "JetBrains Mono, Menlo, monospace";
 
-function getPythonBins() {
+let detectedPythonBin = null;
+
+async function getPythonBin() {
+  if (detectedPythonBin) return detectedPythonBin;
+  const script = `${appHome()}/mods/company-music/player.py`;
   const isWin = window()?.platform === "windows" || appHome().includes(":") || appHome().includes("\\");
-  return isWin ? ["python", "pythonw", "python3", "py"] : ["python3", "python"];
+  const candidates = isWin ? ["python", "py", "python3"] : ["python3", "python"];
+  for (const bin of candidates) {
+    const r = await exec(bin, [script, "check"], { timeout: 4000 }).catch(() => null);
+    if (r?.stdout && r.stdout.includes('"status"')) {
+      detectedPythonBin = bin;
+      return bin;
+    }
+  }
+  detectedPythonBin = candidates[0];
+  return detectedPythonBin;
+}
+
+async function runPlayer(args, timeout = 15000) {
+  const bin = await getPythonBin();
+  const script = `${appHome()}/mods/company-music/player.py`;
+  const r = await exec(bin, [script, ...args], { timeout }).catch(() => null);
+  if (!r?.stdout) return null;
+  try {
+    return JSON.parse(r.stdout.trim().split("\n").pop());
+  } catch {
+    return null;
+  }
 }
 
 function formatTime(seconds) {
@@ -35,18 +60,12 @@ export default class WorkspaceStatus extends View {
       const music = shared("pixel-hq.music");
       this.polling = true;
       try {
-        const script = `${appHome()}/mods/company-music/player.py`;
-        for (const bin of getPythonBins()) {
-          const r = await exec(bin, [script, "status"], { timeout: 15000 }).catch(() => null);
-          if (!r?.stdout) continue;
-          try {
-            const res = JSON.parse(r.stdout.trim().split("\n").pop());
-            if (res.playing !== music.playing || res.status !== music.status || (res.title && res.title !== music.title) || (res.url && res.url !== music.url)) {
-              setShared("pixel-hq.music", res);
-              cx.notify();
-            }
-            break;
-          } catch {}
+        const res = await runPlayer(["status"], 15000);
+        if (res) {
+          if (res.playing !== music?.playing || res.status !== music?.status || (res.title && res.title !== music?.title) || (res.url && res.url !== music?.url)) {
+            setShared("pixel-hq.music", res);
+            cx.notify();
+          }
         }
       } finally {
         this.polling = false;
@@ -68,16 +87,10 @@ export default class WorkspaceStatus extends View {
       if (cx) cx.notify();
     }
     try {
-      const script = `${appHome()}/mods/company-music/player.py`;
-      for (const bin of getPythonBins()) {
-        const r = await exec(bin, [script, action], { timeout: 35000 }).catch(() => null);
-        if (!r?.stdout) continue;
-        try {
-          const res = JSON.parse(r.stdout.trim().split("\n").pop());
-          setShared("pixel-hq.music", res);
-          if (cx) cx.notify();
-          break;
-        } catch {}
+      const res = await runPlayer([action], 35000);
+      if (res) {
+        setShared("pixel-hq.music", res);
+        if (cx) cx.notify();
       }
     } finally {
       this.actionBusy = false;
@@ -181,8 +194,10 @@ export default class WorkspaceStatus extends View {
           const title = m?.title || "MusicBox";
 
           const nowSec = Math.floor(Date.now() / 1000);
-          const baseElapsed = Number(m?.elapsed || m?.currentElapsed || 0);
-          const liveElapsed = isPlaying && m?.startTime ? baseElapsed + Math.max(0, nowSec - m.startTime) : (m?.currentElapsed || baseElapsed);
+          const pauseElapsed = Number(m?.elapsed || 0);
+          const liveElapsed = isPlaying && m?.startTime
+            ? pauseElapsed + Math.max(0, nowSec - m.startTime)
+            : Number(m?.currentElapsed || pauseElapsed);
           const dur = Number(m?.duration || 0);
           const timeText = dur > 0 ? `${formatTime(liveElapsed)}/${formatTime(dur)}` : formatTime(liveElapsed);
           if (isPlaying || isPaused || isBuffering) {
