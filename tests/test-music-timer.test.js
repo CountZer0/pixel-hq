@@ -145,7 +145,9 @@ function testBinaryResolutionCaching() {
 }
 
 function testMusicBoxDisableToggle() {
-  function checkDisabled(store, settingsObj) {
+  function checkDisabled(store, settingsObj, sharedObj = {}) {
+    const sh = sharedObj["pixel-hq.musicbox.hidden"];
+    if (sh !== undefined && sh !== null) return Boolean(sh);
     try {
       if (store?.getItem("pixel-hq.musicbox.hidden") === "true") return true;
     } catch {}
@@ -170,6 +172,9 @@ function testMusicBoxDisableToggle() {
 
   mockStorage.removeItem("pixel-hq.musicbox.hidden");
   assert.strictEqual(checkDisabled(mockStorage, {}), false);
+
+  assert.strictEqual(checkDisabled(mockStorage, {}, { "pixel-hq.musicbox.hidden": true }), true);
+  assert.strictEqual(checkDisabled(mockStorage, {}, { "pixel-hq.musicbox.hidden": false }), false);
 
   assert.strictEqual(checkDisabled(mockStorage, { musicbox: false }), true);
   assert.strictEqual(checkDisabled(mockStorage, { music: { enabled: false } }), true);

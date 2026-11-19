@@ -48,6 +48,8 @@ function formatTime(seconds) {
 }
 
 function isMusicBoxHidden() {
+  const sh = shared("pixel-hq.musicbox.hidden");
+  if (sh !== undefined && sh !== null) return Boolean(sh);
   try {
     if (localStorage.getItem("pixel-hq.musicbox.hidden") === "true") return true;
   } catch {}
@@ -930,13 +932,15 @@ export default class CompanyMusic extends View {
                   .hover((s) => s.bg(t.hover).text_color(t.foreground))
                   .tooltip(isMusicHidden ? "Hiện lại trên thanh trạng thái" : "Ẩn MusicBox khỏi thanh trạng thái (Right-click trên status bar cũng ẩn được)")
                   .on_click((_e, cx) => {
+                    const nextVal = !isMusicBoxHidden();
                     try {
-                      if (isMusicHidden) {
-                        localStorage.removeItem("pixel-hq.musicbox.hidden");
-                      } else {
+                      if (nextVal) {
                         localStorage.setItem("pixel-hq.musicbox.hidden", "true");
+                      } else {
+                        localStorage.removeItem("pixel-hq.musicbox.hidden");
                       }
                     } catch {}
+                    setShared("pixel-hq.musicbox.hidden", nextVal);
                     cx.notify();
                   })
                   .child(isMusicHidden ? "👁️ Hiện thanh trạng thái" : "👁️ Ẩn khỏi status bar")

@@ -5,6 +5,8 @@ import { spaces, panes, focused, agents, theme, run, window, keys, setBadge, ope
 const MONO = "JetBrains Mono, Menlo, monospace";
 
 function isMusicBoxDisabled() {
+  const sh = shared("pixel-hq.musicbox.hidden");
+  if (sh !== undefined && sh !== null) return Boolean(sh);
   try {
     if (localStorage.getItem("pixel-hq.musicbox.hidden") === "true") return true;
   } catch {}
@@ -62,8 +64,15 @@ export default class WorkspaceStatus extends View {
   init(_props, cx) {
     if (checking()) return;
     this.polling = false;
-    cx.timer.every(1000, (cx) => {
-      if (isMusicBoxDisabled()) return;
+    let prevDisabled = isMusicBoxDisabled();
+    cx.timer.every(500, (cx) => {
+      const curDisabled = isMusicBoxDisabled();
+      if (curDisabled !== prevDisabled) {
+        prevDisabled = curDisabled;
+        cx.notify();
+        return;
+      }
+      if (curDisabled) return;
       const music = shared("pixel-hq.music");
       if (music?.playing) cx.notify();
     });
@@ -206,7 +215,9 @@ export default class WorkspaceStatus extends View {
                 .tooltip(setup.msg || "Installing audio engine... · Click to view")
                 .on_click(() => run("mod.open", { name: "company-music" }))
                 .on_mouse_down("right", (_e, cx) => {
+                  cx.stop_propagation();
                   try { localStorage.setItem("pixel-hq.musicbox.hidden", "true"); } catch {}
+                  setShared("pixel-hq.musicbox.hidden", true);
                   cx.notify();
                 })
                 .child(div().text_size(10).child("⏳"))
@@ -238,7 +249,9 @@ export default class WorkspaceStatus extends View {
                 .border_1()
                 .border_color("#313244")
                 .on_mouse_down("right", (_e, cx) => {
+                  cx.stop_propagation();
                   try { localStorage.setItem("pixel-hq.musicbox.hidden", "true"); } catch {}
+                  setShared("pixel-hq.musicbox.hidden", true);
                   cx.notify();
                 })
                 .child(
@@ -341,7 +354,9 @@ export default class WorkspaceStatus extends View {
               .tooltip("Open Pixel MusicBox · Chuột phải để ẩn khỏi thanh trạng thái")
               .on_click(() => run("mod.open", { name: "company-music" }))
               .on_mouse_down("right", (_e, cx) => {
+                cx.stop_propagation();
                 try { localStorage.setItem("pixel-hq.musicbox.hidden", "true"); } catch {}
+                setShared("pixel-hq.musicbox.hidden", true);
                 cx.notify();
               })
               .child("📻 MusicBox");
