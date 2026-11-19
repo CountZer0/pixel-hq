@@ -1,5 +1,5 @@
 {
-  "version": "1.7.9",
+  "version": "1.7.10",
   "type": "normal",
-  "notes": "Optimize prefetch pool to prevent YouTube bot rate-limiting, and add MusicBox visibility toggle"
+  "notes": "Add default Ctrl+Shift+M hotkey and in-modal guidance for MusicBox toggle"
 }
