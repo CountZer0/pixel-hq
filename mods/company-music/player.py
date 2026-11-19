@@ -18,7 +18,8 @@ def get_subprocess_kwargs(**kwargs):
         flags = kwargs.get("creationflags", 0)
         DETACHED_PROCESS = 0x00000008
         CREATE_NO_WINDOW = 0x08000000
-        kwargs["creationflags"] = flags | DETACHED_PROCESS | CREATE_NO_WINDOW
+        CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+        kwargs["creationflags"] = flags | DETACHED_PROCESS | CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB
         startupinfo = kwargs.get("startupinfo")
         if startupinfo is None:
             startupinfo = subprocess.STARTUPINFO()
@@ -112,7 +113,7 @@ def is_valid_player_proc(pid):
     elif sys.platform == "win32":
         try:
             import ctypes
-            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1400
             h = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
             if not h:
                 return False
@@ -456,7 +457,7 @@ def extract_stream_info(url):
     env["PYTHONIOENCODING"] = "utf-8"
     try:
         r = run_cmd(
-            [*cmd, "--encoding", "utf-8", "--no-warnings", "--no-playlist", "-f", "ba/b", "--print", "%(title)s", "--print", "%(duration)s", "-g", clean_url],
+            [*cmd, "--encoding", "utf-8", "--no-warnings", "--no-playlist", "--extractor-args", "youtube:player_client=ios,android,web", "-f", "ba/b", "--print", "%(title)s", "--print", "%(duration)s", "-g", clean_url],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -746,8 +747,6 @@ def cmd_play_queue_index(index):
     if not stream_url or (now - item.get("resolved_at", 0) >= 14400):
         ext_title, ext_stream, ext_dur, err = extract_stream_info(url)
         if err or not ext_stream:
-            if index + 1 < len(queue["items"]):
-                return cmd_play_queue_index(index + 1)
             clear_queue()
             clear_state()
             return {"status": "error", "error": err or "Failed to extract stream", "playing": False}
@@ -771,7 +770,8 @@ def cmd_play_queue_index(index):
         return {"status": "error", "error": "Neither ffplay nor mpv found. Install ffmpeg or mpv to enable playback.", "playing": False}
 
     is_ffplay = "ffplay" in os.path.basename(player_bin).lower()
-    args = [player_bin, "-nodisp", "-autoexit", "-loglevel", "quiet", stream_url] if is_ffplay else [player_bin, "--no-video", "--really-quiet", stream_url]
+    ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    args = [player_bin, "-nodisp", "-autoexit", "-loglevel", "quiet", "-user_agent", ua, stream_url] if is_ffplay else [player_bin, "--no-video", "--really-quiet", f"--user-agent={ua}", stream_url]
     env = os.environ.copy()
     env["SDL_VIDEODRIVER"] = "dummy"
 
@@ -907,29 +907,42 @@ def cmd_play(url, preset_title=None):
             "history": read_history()
         })
         video_id = extract_video_id(res)
-        first_url = f"https://www.youtube.com/watch?v={video_id}" if video_id else None
-        if not first_url:
-            init_items = extract_playlist_items(res, limit=1)
-            if init_items:
-                first_url = init_items[0]["url"]
-                video_id = init_items[0]["id"]
-            else:
-                first_url = res
+        init_items = extract_playlist_items(res, limit=25)
+        if init_items:
+            first_url = init_items[0]["url"]
+            video_id = init_items[0]["id"]
+            first_title = init_items[0]["title"]
+            first_dur = init_items[0]["duration"]
+        elif video_id:
+            first_url = f"https://www.youtube.com/watch?v={video_id}"
+            first_title = "YouTube Track"
+            first_dur = 0
+            init_items = [{
+                "id": video_id,
+                "title": first_title,
+                "duration": first_dur,
+                "url": first_url,
+                "stream_url": None,
+                "resolved_at": 0
+            }]
+        else:
+            first_url = res
+            first_title = "YouTube Track"
+            first_dur = 0
+            init_items = []
 
         ext_title, ext_stream, ext_dur, err = extract_stream_info(first_url)
         if err or not ext_stream:
-            init_items = extract_playlist_items(res, limit=5)
-            if len(init_items) > 1:
-                queue_data = {
-                    "playlist_url": res,
-                    "current_index": 0,
-                    "items": init_items,
-                    "needs_expansion": True
-                }
-                write_queue(queue_data)
-                return cmd_play_queue_index(0)
             clear_state()
             return {"status": "error", "error": err or "Failed to extract stream", "playing": False, "history": read_history()}
+
+        if init_items:
+            init_items[0]["stream_url"] = ext_stream
+            if ext_title:
+                init_items[0]["title"] = ext_title
+            if ext_dur:
+                init_items[0]["duration"] = ext_dur
+            init_items[0]["resolved_at"] = int(time.time())
 
         player_bin = find_player_bin()
         if not player_bin:
@@ -937,7 +950,8 @@ def cmd_play(url, preset_title=None):
             return {"status": "error", "error": "Neither ffplay nor mpv found. Install ffmpeg or mpv to enable playback.", "playing": False, "history": read_history()}
 
         is_ffplay = "ffplay" in os.path.basename(player_bin).lower()
-        args = [player_bin, "-nodisp", "-autoexit", "-loglevel", "quiet", ext_stream] if is_ffplay else [player_bin, "--no-video", "--really-quiet", ext_stream]
+        ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        args = [player_bin, "-nodisp", "-autoexit", "-loglevel", "quiet", "-user_agent", ua, ext_stream] if is_ffplay else [player_bin, "--no-video", "--really-quiet", f"--user-agent={ua}", ext_stream]
         env = os.environ.copy()
         env["SDL_VIDEODRIVER"] = "dummy"
 
@@ -957,7 +971,7 @@ def cmd_play(url, preset_title=None):
         queue_data = {
             "playlist_url": res,
             "current_index": 0,
-            "items": [{
+            "items": init_items if init_items else [{
                 "id": video_id or "track-1",
                 "title": ext_title or "YouTube Track",
                 "duration": ext_dur or 0,
@@ -965,25 +979,26 @@ def cmd_play(url, preset_title=None):
                 "stream_url": ext_stream,
                 "resolved_at": int(time.time())
             }],
-            "needs_expansion": True
+            "needs_expansion": False
         }
         write_queue(queue_data)
 
-        display_title = ext_title or "YouTube Track"
+        display_title = ext_title or (init_items[0]["title"] if init_items else "YouTube Track")
+        total_count = len(init_items) if init_items else 1
         state = {
             "pid": proc.pid,
             "startTime": int(time.time()),
             "elapsed": 0,
-            "duration": ext_dur or 0,
+            "duration": ext_dur or (init_items[0]["duration"] if init_items else 0),
             "currentElapsed": 0,
             "url": first_url,
-            "title": display_title,
+            "title": f"[1/{total_count}] {display_title}",
             "status": "playing",
             "playing": True,
             "source": "youtube",
             "playlist": {
                 "index": 1,
-                "total": 1
+                "total": total_count
             },
             "history": read_history()
         }
@@ -1037,7 +1052,8 @@ def cmd_play(url, preset_title=None):
             update_history_title(res, title)
 
     is_ffplay = "ffplay" in os.path.basename(player_bin).lower()
-    args = [player_bin, "-nodisp", "-autoexit", "-loglevel", "quiet", stream_url] if is_ffplay else [player_bin, "--no-video", "--really-quiet", stream_url]
+    ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    args = [player_bin, "-nodisp", "-autoexit", "-loglevel", "quiet", "-user_agent", ua, stream_url] if is_ffplay else [player_bin, "--no-video", "--really-quiet", f"--user-agent={ua}", stream_url]
     env = os.environ.copy()
     env["SDL_VIDEODRIVER"] = "dummy"
 
@@ -1166,16 +1182,33 @@ def cmd_status():
             write_state(current)
             return current
 
+        is_completed = is_expired or (dur == 0) or (dur > 0 and current_elapsed >= max(15, dur * 0.85))
+
         queue = read_queue()
         if queue and queue.get("items"):
             cur_idx = queue.get("current_index", 0)
             items = queue.get("items", [])
-            if cur_idx + 1 < len(items):
-                res = cmd_play_queue_index(cur_idx + 1)
-                res["history"] = read_history()
-                return res
+            if is_completed:
+                if cur_idx + 1 < len(items):
+                    res = cmd_play_queue_index(cur_idx + 1)
+                    res["history"] = read_history()
+                    return res
+                else:
+                    clear_queue()
             else:
-                clear_queue()
+                retry_count = current.get("retry_count", 0)
+                if retry_count < 1 and cur_idx < len(items):
+                    current["retry_count"] = retry_count + 1
+                    items[cur_idx]["stream_url"] = None
+                    items[cur_idx]["resolved_at"] = 0
+                    queue["items"] = items
+                    write_queue(queue)
+                    res = cmd_play_queue_index(cur_idx)
+                    res["retry_count"] = retry_count + 1
+                    write_state(res)
+                    return res
+                else:
+                    clear_queue()
 
     clear_state()
     return {"status": "idle", "playing": False, "title": "", "url": "", "source": "direct", "elapsed": 0, "duration": 0, "currentElapsed": 0, "history": read_history()}

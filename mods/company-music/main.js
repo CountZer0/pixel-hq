@@ -5,7 +5,7 @@ import { theme, run, shared, setShared, closeOverlay, checking, appHome, exec, w
 const MONO = "JetBrains Mono, Menlo, monospace";
 
 function getPythonBins() {
-  const isWin = window()?.platform === "windows" || appHome().includes(":\\");
+  const isWin = window()?.platform === "windows" || appHome().includes(":") || appHome().includes("\\");
   return isWin ? ["python", "pythonw", "python3", "py"] : ["python3", "python"];
 }
 
@@ -40,6 +40,10 @@ export default class CompanyMusic extends View {
     this.installMsg = null;
     this.installSuccess = null;
     this.history = shared("pixel-hq.music")?.history || [];
+    const curMusic = shared("pixel-hq.music");
+    if (curMusic?.error && curMusic.status !== "error") {
+      setShared("pixel-hq.music", { ...curMusic, error: null });
+    }
 
     this.urlInput = InputState.new({ placeholder: "Paste YouTube, SoundCloud, or direct audio stream URL..." });
     this.urlInput.on("submit", (_e, cx) => this.play(this.urlInput.value(), null, cx));
@@ -345,17 +349,24 @@ export default class CompanyMusic extends View {
     this.busy = true;
     this.error = null;
 
+    const curMusic = shared("pixel-hq.music") || {};
+    const safeTitle = presetTitle ? presetTitle.replace(/["\r\n\\|]/g, " ").trim() : null;
+    const isExt = cleanUrl.includes("youtu") || cleanUrl.includes("soundcloud") || cleanUrl.includes("list=");
+    const finalTitle = isExt ? null : safeTitle;
+
     setShared("pixel-hq.music", {
+      ...curMusic,
       playing: false,
       status: "buffering",
-      title: presetTitle || "Buffering stream...",
+      title: safeTitle || "Buffering stream...",
       url: cleanUrl,
-      source: "direct"
+      error: null,
+      history: this.history && this.history.length > 0 ? this.history : (curMusic.history || [])
     });
     cx.notify();
 
     const script = `${appHome()}/mods/company-music/player.py`;
-    const args = presetTitle ? [script, "play", cleanUrl, presetTitle] : [script, "play", cleanUrl];
+    const args = finalTitle ? [script, "play", cleanUrl, finalTitle] : [script, "play", cleanUrl];
 
     let res = null;
     try {
@@ -371,12 +382,14 @@ export default class CompanyMusic extends View {
       if (res?.status === "error") {
         this.error = res.error;
         setShared("pixel-hq.music", {
+          ...curMusic,
           playing: false,
           status: "error",
           title: "",
           url: cleanUrl,
           error: res.error,
-          source: "direct"
+          source: "direct",
+          history: this.history && this.history.length > 0 ? this.history : (curMusic.history || [])
         });
         if (res.error.includes("Neither ffplay nor mpv found")) {
           this.showGuide = true;
@@ -388,16 +401,21 @@ export default class CompanyMusic extends View {
         } else {
           this.loadHistory(cx);
         }
-        setShared("pixel-hq.music", res);
+        setShared("pixel-hq.music", {
+          ...res,
+          history: Array.isArray(res.history) ? res.history : (this.history || curMusic.history || [])
+        });
       } else {
         this.error = "Could not start audio player. Verify Python, ffplay or mpv is installed.";
         setShared("pixel-hq.music", {
+          ...curMusic,
           playing: false,
           status: "error",
           title: "",
           url: cleanUrl,
           error: this.error,
-          source: "direct"
+          source: "direct",
+          history: this.history && this.history.length > 0 ? this.history : (curMusic.history || [])
         });
       }
     } finally {
@@ -1385,7 +1403,8 @@ export default class CompanyMusic extends View {
                   .hover((s) => s.border_color("#89b4fa"))
                   .on_click((_e, cx) => {
                     this.urlInput.set_value(h.url);
-                    this.play(h.url, h.title, cx);
+                    const isMedia = h.type === "playlist" || h.type === "youtube" || h.type === "soundcloud";
+                    this.play(h.url, isMedia ? null : h.title, cx);
                   })
                   .child(
                     h_flex()

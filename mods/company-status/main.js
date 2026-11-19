@@ -5,7 +5,7 @@ import { spaces, panes, focused, agents, theme, run, window, keys, setBadge, ope
 const MONO = "JetBrains Mono, Menlo, monospace";
 
 function getPythonBins() {
-  const isWin = window()?.platform === "windows" || appHome().includes(":\\");
+  const isWin = window()?.platform === "windows" || appHome().includes(":") || appHome().includes("\\");
   return isWin ? ["python", "pythonw", "python3", "py"] : ["python3", "python"];
 }
 
