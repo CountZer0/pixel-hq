@@ -39,14 +39,27 @@ STATE_FILE = os.path.join(CACHE_DIR, "state.json")
 QUEUE_FILE = os.path.join(CACHE_DIR, "queue.json")
 PREFETCH_PID_FILE = os.path.join(CACHE_DIR, "prefetch.pid")
 HISTORY_FILE = os.path.join(CACHE_DIR, "history.json")
+COOKIES_FILE = os.path.join(CACHE_DIR, "cookies.txt")
+LOG_FILE = os.path.join(CACHE_DIR, "player.log")
+
+def log_debug(msg):
+    try:
+        ensure_cache_dir()
+        ts = time.strftime("%Y-%m-%d %H:%M:%S")
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"[{ts}] [{os.getpid()}] {msg}\n")
+    except Exception:
+        pass
 
 def set_cache_dir(new_dir):
-    global CACHE_DIR, STATE_FILE, QUEUE_FILE, PREFETCH_PID_FILE, HISTORY_FILE
+    global CACHE_DIR, STATE_FILE, QUEUE_FILE, PREFETCH_PID_FILE, HISTORY_FILE, COOKIES_FILE, LOG_FILE
     CACHE_DIR = new_dir
     STATE_FILE = os.path.join(CACHE_DIR, "state.json")
     QUEUE_FILE = os.path.join(CACHE_DIR, "queue.json")
     PREFETCH_PID_FILE = os.path.join(CACHE_DIR, "prefetch.pid")
     HISTORY_FILE = os.path.join(CACHE_DIR, "history.json")
+    COOKIES_FILE = os.path.join(CACHE_DIR, "cookies.txt")
+    LOG_FILE = os.path.join(CACHE_DIR, "player.log")
 
 def spawn_player_process(player_bin, stream_url, ua, start_seconds=0):
     is_ffplay = "ffplay" in os.path.basename(player_bin).lower()
@@ -86,7 +99,7 @@ def spawn_player_process(player_bin, stream_url, ua, start_seconds=0):
         return proc, None
     except Exception as e:
         return None, str(e)
-POOL_SIZE = 5
+POOL_SIZE = 1
 MAX_HISTORY = 3
 
 DEFAULT_PRESETS = [
@@ -502,9 +515,12 @@ def extract_stream_info(url):
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
+    extra_args = []
+    if os.path.isfile(COOKIES_FILE):
+        extra_args.extend(["--cookies", COOKIES_FILE])
     try:
         r = run_cmd(
-            [*cmd, "--encoding", "utf-8", "--no-warnings", "--no-playlist", "--extractor-args", "youtube:player_client=ios,android,web", "-f", "ba/b", "--print", "%(title)s", "--print", "%(duration)s", "-g", clean_url],
+            [*cmd, "--encoding", "utf-8", "--no-warnings", "--no-playlist", *extra_args, "--extractor-args", "youtube:player_client=ios,android,web", "-f", "ba/b", "--print", "%(title)s", "--print", "%(duration)s", "-g", clean_url],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -529,7 +545,13 @@ def extract_stream_info(url):
                     title_parts.append(l)
                 title = " ".join(title_parts).strip() if title_parts else derive_direct_title(url)
                 return title, stream_url, duration, None
+        err_msg = r.stderr.strip() if r.stderr else ""
+        if "Sign in to confirm you're not a bot" in err_msg or "Sign in to confirm you’re not a bot" in err_msg:
+            log_debug(f"cmd_extract_stream_info bot_check: {err_msg}")
+            return None, None, 0, "YouTube anti-bot challenge: YouTube tạm chặn IP do nghe nhiều bài liên tục ('Sign in to confirm you're not a bot'). Bạn có thể đổi mạng/VPN hoặc đợi 30-60 phút."
+        log_debug(f"cmd_extract_stream_info error: returncode={r.returncode}, stderr={err_msg}")
     except Exception as e:
+        log_debug(f"cmd_extract_stream_info exception: {e}")
         return None, None, 0, f"Failed to extract stream: {str(e)}"
 
     return None, None, 0, "Extractor error. YouTube or SoundCloud stream could not be resolved. Try running 'yt-dlp -U'."
@@ -580,9 +602,12 @@ def extract_playlist_items(url, limit=25):
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
+    extra_args = []
+    if os.path.isfile(COOKIES_FILE):
+        extra_args.extend(["--cookies", COOKIES_FILE])
     try:
         r = run_cmd(
-            [*cmd, "--encoding", "utf-8", "--no-warnings", "--flat-playlist", "--playlist-end", str(limit), "--print", "%(id)s\t%(title)s\t%(duration)s", url],
+            [*cmd, "--encoding", "utf-8", "--no-warnings", "--flat-playlist", "--playlist-end", str(limit), *extra_args, "--print", "%(id)s\t%(title)s\t%(duration)s", url],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -714,6 +739,7 @@ def cmd_prefetch():
             it = q_now["items"][idx]
             if it.get("stream_url") and (now - it.get("resolved_at", 0) < 14400):
                 continue
+            time.sleep(3)
             ext_title, ext_stream, ext_dur, err = extract_stream_info(it["url"])
             if ext_stream:
                 q_update = read_queue()

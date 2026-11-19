@@ -47,6 +47,13 @@ function formatTime(seconds) {
   return `${m.toString().padStart(2, "0")}:${rem.toString().padStart(2, "0")}`;
 }
 
+function isMusicBoxHidden() {
+  try {
+    if (localStorage.getItem("pixel-hq.musicbox.hidden") === "true") return true;
+  } catch {}
+  return false;
+}
+
 const PRESETS = [
   { id: "somafm-chill", title: "SomaFM Groove Salad", desc: "Ambient & Downtempo", url: "https://ice2.somafm.com/groovesalad-128-mp3", tag: "Direct MP3" },
   { id: "nightwave", title: "Nightwave Plaza", desc: "Vaporwave & City Pop", url: "https://radio.plaza.one/mp3", tag: "Direct MP3" },
@@ -844,6 +851,7 @@ export default class CompanyMusic extends View {
     const isStalePlayerError = Boolean(this.depStatus?.has_player && rawError && rawError.includes("Neither ffplay nor mpv"));
     const isStaleYtDlpError = Boolean(this.depStatus?.has_ytdlp && rawError && rawError.includes("yt-dlp"));
     const activeError = (isStalePlayerError || isStaleYtDlpError) ? null : rawError;
+    const isMusicHidden = isMusicBoxHidden();
 
     return v_flex()
       .track_focus(this.handle)
@@ -905,18 +913,64 @@ export default class CompanyMusic extends View {
               )
           )
           .child(
-            div()
-              .cursor_pointer()
-              .px(7)
-              .py(2)
-              .rounded(4)
-              .text_size(11)
-              .font_family(MONO)
-              .text_color(t.dim)
-              .hover((s) => s.bg(t.hover).text_color(t.foreground))
-              .on_click(() => closeOverlay(props()?.overlay))
-              .child("✕ Close")
+            h_flex()
+              .gap(6)
+              .items_center()
+              .child(
+                div()
+                  .id("btn-toggle-status-bar")
+                  .cursor_pointer()
+                  .px(6)
+                  .py(2)
+                  .rounded(4)
+                  .text_size(10.5)
+                  .font_family(MONO)
+                  .bg(isMusicHidden ? "#45475a" : "#313244")
+                  .text_color(isMusicHidden ? "#f9e2af" : t.dim)
+                  .hover((s) => s.bg(t.hover).text_color(t.foreground))
+                  .tooltip(isMusicHidden ? "Hiện lại trên thanh trạng thái" : "Ẩn MusicBox khỏi thanh trạng thái (Right-click trên status bar cũng ẩn được)")
+                  .on_click((_e, cx) => {
+                    try {
+                      if (isMusicHidden) {
+                        localStorage.removeItem("pixel-hq.musicbox.hidden");
+                      } else {
+                        localStorage.setItem("pixel-hq.musicbox.hidden", "true");
+                      }
+                    } catch {}
+                    cx.notify();
+                  })
+                  .child(isMusicHidden ? "👁️ Hiện thanh trạng thái" : "👁️ Ẩn khỏi status bar")
+              )
+              .child(
+                div()
+                  .cursor_pointer()
+                  .px(7)
+                  .py(2)
+                  .rounded(4)
+                  .text_size(11)
+                  .font_family(MONO)
+                  .text_color(t.dim)
+                  .hover((s) => s.bg(t.hover).text_color(t.foreground))
+                  .on_click(() => closeOverlay(props()?.overlay))
+                  .child("✕ Close")
+              )
           )
+      )
+      .when(isMusicHidden, (el) =>
+        el.child(
+          h_flex()
+            .w_full()
+            .px(8)
+            .py(4)
+            .rounded(6)
+            .bg("#f9e2af15")
+            .border_1()
+            .border_color("#f9e2af33")
+            .items_center()
+            .gap(6)
+            .child(div().text_size(11).child("💡"))
+            .child(div().text_size(10.5).text_color("#f9e2af").child("MusicBox hiện đang ẩn khỏi thanh trạng thái. Nhấn nút bên trên để hiển thị lại bất cứ lúc nào."))
+        )
       )
       .child(
         v_flex()

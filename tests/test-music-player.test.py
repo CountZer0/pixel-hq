@@ -276,10 +276,7 @@ def test_9_playlist_queue_and_auto_advance():
             assert p_res["status"] == "ok"
             q_after = player.read_queue()
             assert q_after["items"][1]["stream_url"] == "https://stream2"
-            assert q_after["items"][2]["stream_url"] == "https://resolved-v3"
-            assert q_after["items"][3]["stream_url"] == "https://resolved-v4"
-            assert q_after["items"][4]["stream_url"] == "https://resolved-v5"
-            assert q_after["items"][5]["stream_url"] == "https://resolved-v6"
+            assert q_after["items"][2]["stream_url"] is None
 
             res_play = player.cmd_play_queue_index(0)
             assert res_play["status"] == "playing"
@@ -590,6 +587,87 @@ def test_13_single_track_navigation_boundary():
             player.PREFETCH_PID_FILE = orig_prefetch
     print("PASS: Test 13 - Single-Track Next/Prev Step Verification & Boundary verified")
 
+def test_14_youtube_bot_detection_handling():
+    print("=== Test 14: YouTube Bot Detection Recognition & Reporting ===")
+    with tempfile.TemporaryDirectory() as td:
+        orig_cache = player.CACHE_DIR
+        orig_run_cmd = player.run_cmd
+        orig_find_ytdlp = player.find_ytdlp_bin
+        player.set_cache_dir(td)
+        player.find_ytdlp_bin = lambda: "fake-yt-dlp"
+
+        class MockCompletedProcess:
+            def __init__(self, returncode, stdout, stderr):
+                self.returncode = returncode
+                self.stdout = stdout
+                self.stderr = stderr
+
+        def mock_bot_run_cmd(cmd, **kwargs):
+            return MockCompletedProcess(1, "", "ERROR: [youtube] b0cQ4ylNbpo: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication.")
+
+        player.run_cmd = mock_bot_run_cmd
+        try:
+            title, stream_url, dur, err = player.extract_stream_info("https://www.youtube.com/watch?v=b0cQ4ylNbpo")
+            assert title is None
+            assert stream_url is None
+            assert dur == 0
+            assert err is not None
+            assert "anti-bot" in err
+            assert "Sign in to confirm you're not a bot" in err
+        finally:
+            player.run_cmd = orig_run_cmd
+            player.find_ytdlp_bin = orig_find_ytdlp
+            player.set_cache_dir(orig_cache)
+    print("PASS: Test 14 - YouTube Bot Detection accurately recognized and reported")
+
+def test_15_cookies_file_integration():
+    print("=== Test 15: Automatic cookies.txt Detection & Passing ===")
+    with tempfile.TemporaryDirectory() as td:
+        orig_cache = player.CACHE_DIR
+        orig_run_cmd = player.run_cmd
+        orig_find_ytdlp = player.find_ytdlp_bin
+        player.set_cache_dir(td)
+        player.find_ytdlp_bin = lambda: "fake-yt-dlp"
+
+        captured_commands = []
+
+        class MockCompletedProcess:
+            def __init__(self, returncode, stdout, stderr):
+                self.returncode = returncode
+                self.stdout = stdout
+                self.stderr = stderr
+
+        def mock_capture_run_cmd(cmd, **kwargs):
+            captured_commands.append(list(cmd))
+            return MockCompletedProcess(0, "Test Title\n180\nhttps://audio.googlevideo.com/videoplayback\n", "")
+
+        player.run_cmd = mock_capture_run_cmd
+        try:
+            player.extract_stream_info("https://www.youtube.com/watch?v=xyz")
+            assert len(captured_commands) == 1
+            assert "--cookies" not in captured_commands[0]
+
+            cookies_path = os.path.join(td, "cookies.txt")
+            with open(cookies_path, "w", encoding="utf-8") as f:
+                f.write("# Netscape HTTP Cookie File\n")
+
+            player.extract_stream_info("https://www.youtube.com/watch?v=xyz")
+            assert len(captured_commands) == 2
+            assert "--cookies" in captured_commands[1]
+            cookie_idx = captured_commands[1].index("--cookies")
+            assert captured_commands[1][cookie_idx + 1] == cookies_path
+
+            player.extract_playlist_items("https://www.youtube.com/playlist?list=PLxyz")
+            assert len(captured_commands) == 3
+            assert "--cookies" in captured_commands[2]
+            cookie_idx = captured_commands[2].index("--cookies")
+            assert captured_commands[2][cookie_idx + 1] == cookies_path
+        finally:
+            player.run_cmd = orig_run_cmd
+            player.find_ytdlp_bin = orig_find_ytdlp
+            player.set_cache_dir(orig_cache)
+    print("PASS: Test 15 - Automatic cookies.txt detection and argument injection verified")
+
 def main():
     suite_td = tempfile.mkdtemp(prefix="pixel_hq_test_cache_")
     orig_env = os.environ.get("PIXEL_HQ_CACHE_DIR")
@@ -610,7 +688,9 @@ def main():
         test_11_playback_progress_counter()
         test_12_premature_exit_rejection_vs_completion()
         test_13_single_track_navigation_boundary()
-        print("All 13 Music Player unit test suites passed successfully!")
+        test_14_youtube_bot_detection_handling()
+        test_15_cookies_file_integration()
+        print("All 15 Music Player unit test suites passed successfully!")
     finally:
         player.set_cache_dir(orig_cache)
         if orig_env is not None:

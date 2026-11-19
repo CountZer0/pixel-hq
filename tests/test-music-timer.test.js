@@ -144,8 +144,44 @@ function testBinaryResolutionCaching() {
   })();
 }
 
+function testMusicBoxDisableToggle() {
+  function checkDisabled(store, settingsObj) {
+    try {
+      if (store?.getItem("pixel-hq.musicbox.hidden") === "true") return true;
+    } catch {}
+    try {
+      const cfg = settingsObj;
+      if (cfg?.musicbox === false || cfg?.music?.enabled === false || cfg?.["company-music"]?.enabled === false) return true;
+    } catch {}
+    return false;
+  }
+
+  const mockStorage = {
+    _data: {},
+    getItem(k) { return this._data[k] ?? null; },
+    setItem(k, v) { this._data[k] = String(v); },
+    removeItem(k) { delete this._data[k]; }
+  };
+
+  assert.strictEqual(checkDisabled(mockStorage, {}), false);
+
+  mockStorage.setItem("pixel-hq.musicbox.hidden", "true");
+  assert.strictEqual(checkDisabled(mockStorage, {}), true);
+
+  mockStorage.removeItem("pixel-hq.musicbox.hidden");
+  assert.strictEqual(checkDisabled(mockStorage, {}), false);
+
+  assert.strictEqual(checkDisabled(mockStorage, { musicbox: false }), true);
+  assert.strictEqual(checkDisabled(mockStorage, { music: { enabled: false } }), true);
+  assert.strictEqual(checkDisabled(mockStorage, { "company-music": { enabled: false } }), true);
+  assert.strictEqual(checkDisabled(mockStorage, { musicbox: true }), false);
+
+  console.log("PASS: MusicBox disable toggle via localStorage and settings verified");
+}
+
 console.log("=== Running Music Timer & Progression Tests ===");
 testFormatTime();
 testTimerNoDoubleCountingAcrossTicks();
 testPauseAndResumeTransitions();
 testBinaryResolutionCaching();
+testMusicBoxDisableToggle();
