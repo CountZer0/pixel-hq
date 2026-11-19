@@ -1,8 +1,62 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { theme, run, shared, setShared, closeOverlay, checking, appHome, exec, window, props } from "herdr";
+import { theme, run, shared, setShared, closeOverlay, checking, appHome, exec, window, props, readTextFile, writeTextFile, notify, settings } from "herdr";
 
 const MONO = "JetBrains Mono, Menlo, monospace";
+
+async function ensureMusicHotkey(cx) {
+  try {
+    if (cx && typeof cx.bind_keys === "function") {
+      cx.bind_keys([{ keystroke: "ctrl-shift-m", action: "mod.open:company-music" }]);
+    }
+  } catch {}
+  try {
+    const home = appHome();
+    if (!home) return;
+    const path = `${home}/keys.json`;
+    const raw = await readTextFile(path).catch(() => null);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    let changed = false;
+    if (parsed.global && parsed.global["ctrl-shift-m"] !== "mod.open:company-music") {
+      parsed.global["ctrl-shift-m"] = "mod.open:company-music";
+      changed = true;
+    }
+    if (parsed.terminal && parsed.terminal["ctrl-shift-m"] !== "mod.open:company-music") {
+      parsed.terminal["ctrl-shift-m"] = "mod.open:company-music";
+      changed = true;
+    }
+    if (changed) {
+      await writeTextFile(path, JSON.stringify(parsed, null, 2), raw);
+    }
+  } catch {}
+}
+
+async function syncSettingsVisibility(disabled) {
+  try {
+    const home = appHome();
+    if (!home) return;
+    const path = `${home}/settings.json`;
+    const raw = await readTextFile(path).catch(() => null);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    let changed = false;
+    if (disabled) {
+      if (parsed.musicbox !== false) {
+        parsed.musicbox = false;
+        changed = true;
+      }
+    } else {
+      if ("musicbox" in parsed) {
+        delete parsed.musicbox;
+        changed = true;
+      }
+    }
+    if (changed) {
+      await writeTextFile(path, JSON.stringify(parsed, null, 2), raw);
+    }
+  } catch {}
+}
 
 let detectedPythonBin = null;
 
@@ -53,6 +107,10 @@ function isMusicBoxHidden() {
   try {
     if (localStorage.getItem("pixel-hq.musicbox.hidden") === "true") return true;
   } catch {}
+  try {
+    const cfg = settings();
+    if (cfg?.musicbox === false || cfg?.music?.enabled === false || cfg?.["company-music"]?.enabled === false) return true;
+  } catch {}
   return false;
 }
 
@@ -68,6 +126,9 @@ export default class CompanyMusic extends View {
     this.error = null;
     this.busy = false;
     this.depStatus = null;
+    cx.spawn(async (cx) => {
+      await ensureMusicHotkey(cx);
+    });
     this.showGuide = false;
     this.guideTab = window()?.platform === "windows" ? "windows" : window()?.platform === "macos" ? "macos" : "linux";
     this.installing = false;
@@ -936,11 +997,27 @@ export default class CompanyMusic extends View {
                     try {
                       if (nextVal) {
                         localStorage.setItem("pixel-hq.musicbox.hidden", "true");
+                        notify({
+                          title: "Pixel MusicBox đã ẩn khỏi status bar",
+                          body: "Bấm Ctrl + Shift + M hoặc click đài Radio trên sàn làm việc để bật lại.",
+                          level: "info",
+                          timeout: 6000,
+                          action: { name: "mod.open", args: { name: "company-music" } }
+                        });
                       } else {
                         localStorage.removeItem("pixel-hq.musicbox.hidden");
+                        notify({
+                          title: "Pixel MusicBox đã hiện lại",
+                          body: "Nút MusicBox đã được đưa trở lại thanh trạng thái.",
+                          level: "success",
+                          timeout: 3000
+                        });
                       }
                     } catch {}
                     setShared("pixel-hq.musicbox.hidden", nextVal);
+                    cx.spawn(async () => {
+                      await syncSettingsVisibility(nextVal);
+                    });
                     cx.notify();
                   })
                   .child(isMusicHidden ? "👁️ Hiện thanh trạng thái" : "👁️ Ẩn khỏi status bar")

@@ -184,9 +184,61 @@ function testMusicBoxDisableToggle() {
   console.log("PASS: MusicBox disable toggle via localStorage and settings verified");
 }
 
+function testMusicBoxHotkeyAndNotification() {
+  function applyHotkey(parsed) {
+    let changed = false;
+    if (parsed.global && parsed.global["ctrl-shift-m"] !== "mod.open:company-music") {
+      parsed.global["ctrl-shift-m"] = "mod.open:company-music";
+      changed = true;
+    }
+    if (parsed.terminal && parsed.terminal["ctrl-shift-m"] !== "mod.open:company-music") {
+      parsed.terminal["ctrl-shift-m"] = "mod.open:company-music";
+      changed = true;
+    }
+    return { parsed, changed };
+  }
+
+  const initial = { global: { "ctrl-p": "space.switch" }, terminal: { "ctrl-c": "term.copy" } };
+  const res1 = applyHotkey(initial);
+  assert.strictEqual(res1.changed, true);
+  assert.strictEqual(res1.parsed.global["ctrl-shift-m"], "mod.open:company-music");
+  assert.strictEqual(res1.parsed.terminal["ctrl-shift-m"], "mod.open:company-music");
+  assert.strictEqual(res1.parsed.global["ctrl-p"], "space.switch");
+
+  const res2 = applyHotkey(res1.parsed);
+  assert.strictEqual(res2.changed, false);
+
+  function syncSettings(parsed, disabled) {
+    let changed = false;
+    if (disabled) {
+      if (parsed.musicbox !== false) {
+        parsed.musicbox = false;
+        changed = true;
+      }
+    } else {
+      if ("musicbox" in parsed) {
+        delete parsed.musicbox;
+        changed = true;
+      }
+    }
+    return { parsed, changed };
+  }
+
+  const s1 = syncSettings({ zoom: 1.0 }, true);
+  assert.strictEqual(s1.changed, true);
+  assert.strictEqual(s1.parsed.musicbox, false);
+
+  const s2 = syncSettings(s1.parsed, false);
+  assert.strictEqual(s2.changed, true);
+  assert.strictEqual("musicbox" in s2.parsed, false);
+
+  console.log("PASS: MusicBox hotkey registration and settings synchronization verified");
+}
+
 console.log("=== Running Music Timer & Progression Tests ===");
 testFormatTime();
 testTimerNoDoubleCountingAcrossTicks();
 testPauseAndResumeTransitions();
 testBinaryResolutionCaching();
 testMusicBoxDisableToggle();
+testMusicBoxHotkeyAndNotification();

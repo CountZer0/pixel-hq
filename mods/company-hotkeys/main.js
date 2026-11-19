@@ -48,6 +48,7 @@ const HOTKEY_CATEGORIES = [
     category: "System & Palette (Hệ thống & Lệnh nhanh)",
     items: [
       { action: "app.palette", name: "Command Palette", desc: "Mở thanh tìm kiếm lệnh toàn cục" },
+      { action: "mod.open:company-music", name: "Pixel MusicBox", desc: "Bật / tắt nhanh trình phát nhạc Pixel MusicBox", customKeys: ["ctrl-shift-m"] },
       { action: "app.settings", name: "Settings", desc: "Mở cửa sổ cài đặt ứng dụng" },
       { action: "app.help", name: "Help", desc: "Mở tài liệu hướng dẫn và trợ giúp" },
       { action: "layout.toggle:sidebar", name: "Toggle Sidebar", desc: "Ẩn / hiện thanh danh sách sàn bên trái" },

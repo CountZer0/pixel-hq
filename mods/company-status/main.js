@@ -1,8 +1,51 @@
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, panes, focused, agents, theme, run, window, keys, setBadge, openOverlay, shared, setShared, appHome, exec, checking, settings } from "herdr";
+import { spaces, panes, focused, agents, theme, run, window, keys, setBadge, openOverlay, shared, setShared, appHome, exec, checking, settings, readTextFile, writeTextFile, notify } from "herdr";
 
 const MONO = "JetBrains Mono, Menlo, monospace";
+
+async function ensureMusicHotkey(cx) {
+  try {
+    if (cx && typeof cx.bind_keys === "function") {
+      cx.bind_keys([{ keystroke: "ctrl-shift-m", action: "mod.open:company-music" }]);
+    }
+  } catch {}
+  try {
+    const home = appHome();
+    if (!home) return;
+    const path = `${home}/keys.json`;
+    const raw = await readTextFile(path).catch(() => null);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    let changed = false;
+    if (parsed.global && parsed.global["ctrl-shift-m"] !== "mod.open:company-music") {
+      parsed.global["ctrl-shift-m"] = "mod.open:company-music";
+      changed = true;
+    }
+    if (parsed.terminal && parsed.terminal["ctrl-shift-m"] !== "mod.open:company-music") {
+      parsed.terminal["ctrl-shift-m"] = "mod.open:company-music";
+      changed = true;
+    }
+    if (changed) {
+      await writeTextFile(path, JSON.stringify(parsed, null, 2), raw);
+    }
+  } catch {}
+}
+
+function hideMusicBox(cx) {
+  try { localStorage.setItem("pixel-hq.musicbox.hidden", "true"); } catch {}
+  setShared("pixel-hq.musicbox.hidden", true);
+  try {
+    notify({
+      title: "Pixel MusicBox đã ẩn",
+      body: "Bấm Ctrl + Shift + M hoặc click đài Radio trên sàn làm việc để bật lại.",
+      level: "info",
+      timeout: 6000,
+      action: { name: "mod.open", args: { name: "company-music" } }
+    });
+  } catch {}
+  cx.notify();
+}
 
 function isMusicBoxDisabled() {
   const sh = shared("pixel-hq.musicbox.hidden");
@@ -64,6 +107,9 @@ export default class WorkspaceStatus extends View {
   init(_props, cx) {
     if (checking()) return;
     this.polling = false;
+    cx.spawn(async (cx) => {
+      await ensureMusicHotkey(cx);
+    });
     let prevDisabled = isMusicBoxDisabled();
     cx.timer.every(500, (cx) => {
       const curDisabled = isMusicBoxDisabled();
@@ -216,9 +262,7 @@ export default class WorkspaceStatus extends View {
                 .on_click(() => run("mod.open", { name: "company-music" }))
                 .on_mouse_down("right", (_e, cx) => {
                   cx.stop_propagation();
-                  try { localStorage.setItem("pixel-hq.musicbox.hidden", "true"); } catch {}
-                  setShared("pixel-hq.musicbox.hidden", true);
-                  cx.notify();
+                  hideMusicBox(cx);
                 })
                 .child(div().text_size(10).child("⏳"))
                 .child(div().truncate().text_size(11).font_semibold().child("Installing..."));
@@ -250,9 +294,7 @@ export default class WorkspaceStatus extends View {
                 .border_color("#313244")
                 .on_mouse_down("right", (_e, cx) => {
                   cx.stop_propagation();
-                  try { localStorage.setItem("pixel-hq.musicbox.hidden", "true"); } catch {}
-                  setShared("pixel-hq.musicbox.hidden", true);
-                  cx.notify();
+                  hideMusicBox(cx);
                 })
                 .child(
                   div()
@@ -355,9 +397,7 @@ export default class WorkspaceStatus extends View {
               .on_click(() => run("mod.open", { name: "company-music" }))
               .on_mouse_down("right", (_e, cx) => {
                 cx.stop_propagation();
-                try { localStorage.setItem("pixel-hq.musicbox.hidden", "true"); } catch {}
-                setShared("pixel-hq.musicbox.hidden", true);
-                cx.notify();
+                hideMusicBox(cx);
               })
               .child("📻 MusicBox");
           })()
