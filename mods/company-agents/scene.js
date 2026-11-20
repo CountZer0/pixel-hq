@@ -259,16 +259,38 @@ export function scene(W, H, opts = {}) {
   L.push(r(cw + 2, base - 54, 16, 22, "#6fa8d6"), r(cw + 4, base - 52, 4, 10, "#a9d0ee"), r(cw, base - 32, 20, 32, "#b7bfd6"), r(cw, base - 32, 20, 4, "#d3d8ea"), r(cw + 8, base - 24, 4, 4, "#e8744f"),
     r(cw + 10, base - 36, 2, 2, "#e6f2fb").loop("top", { from: base - 36, to: base - 52, period: 2600, easing: "ease-in" }));
 
-  // The plant in the left corner grows with the work shipped today: taller stems, a leaf per task (eight at most), flowers from ten on.
-  // It droops while someone has waited on you for a long time.
-  const shipped = Math.max(0, opts.shipped ?? 0), droop = Boolean(opts.droop), grow = Math.min(16, shipped * 2);
-  const g1 = droop ? "#6e7a3a" : "#2f6e3b", g2 = droop ? "#7d8a40" : "#3a8247", leaf = droop ? "#9aa04c" : "#52a35f", sag = droop ? 10 : 0;
-  const px = 6;
-  L.push(r(px, base - 44 + sag, 10, 26 - sag, g1), r(px + 8, base - 54 - grow + sag, 10, 36 + grow - sag, g2), r(px + 18, base - 42 + sag, 10, 24 - sag, g1), r(px + 4, base - 34 + sag, 6, 6, leaf));
-  const LEAVES = [[-4, -30], [26, -36], [-2, -46], [26, -50], [12, -64], [0, -58], [22, -62], [10, -72]];
-  for (const [dx, dy] of LEAVES.slice(0, Math.min(8, shipped))) L.push(r(px + dx, base + dy + sag, 6, 4, leaf));
-  if (shipped >= 10 && !droop) for (const [dx, dy] of [[12, -78], [2, -64], [24, -68]]) L.push(r(px + dx, base + dy - Math.min(4, grow / 4), 4, 4, "#f5c2e7").loop("opacity", { from: 0.6, to: 1, period: 1800, easing: "ease-in-out" }));
-  L.push(r(px + 2, base - 18, 24, 18, "#8a5a3c"), r(px, base - 18, 28, 4, "#a06c48"));
+  // The plant in the left corner is a little potted tree that grows with the work shipped today: a sapling with one leafy crown,
+  // then a new branch with its own cluster of leaves at 1, 4, 8, 13, 19 and 26 tasks, and pink blossoms from 30. While someone has
+  // waited on you for a long time it droops: the branches sag and the leaves yellow.
+  const shipped = Math.max(0, opts.shipped ?? 0), droop = Boolean(opts.droop);
+  const bark = "#6b4a32", barkHi = "#8a6444";
+  const dark = droop ? "#6e7a3a" : "#2f6e3b", mid = droop ? "#7d8a40" : "#3a8247", lite = droop ? "#a3a852" : "#5fb06b";
+  const px = 6, sag = droop ? 3 : 0, tx = px + 12;
+  // [from x, from y, tip x, tip y, crown size] relative to the pot's left edge and the baseboard; the first is the crown.
+  const BRANCHES = [[tx, -40, tx + 1, -50, 3], [tx, -30, px + 1, -36, 2], [tx + 2, -33, px + 21, -39, 2], [tx, -42, px + 1, -50, 2],
+    [tx + 2, -45, px + 22, -53, 2], [tx, -50, px + 5, -60, 2], [tx + 2, -52, px + 20, -63, 2]];
+  const STEPS = [1, 4, 8, 13, 19, 26], grown = 1 + STEPS.filter((n) => shipped >= n).length;
+  // the trunk, a touch thicker at the base
+  L.push(r(tx, base - 40, 3, 22, bark), r(tx, base - 40, 1, 22, barkHi), r(tx - 1, base - 22, 5, 4, bark));
+  const crowns = [];
+  BRANCHES.slice(0, grown).forEach(([fx, fy, ex, ey, size], i) => {
+    const ty = base + ey + (i ? sag * (i % 2 ? 1 : 2) : sag);
+    // the branch: 2px steps from the trunk out to its tip
+    if (i) {
+      const n = Math.max(Math.abs(ex - fx), Math.abs(ey - fy)) / 2;
+      for (let k = 0; k <= n; k++) L.push(r(Math.round(fx + ((ex - fx) * k) / n), Math.round(base + fy + ((ty - base - fy) * k) / n), 2, 2, bark));
+    }
+    crowns.push([ex, ty, size, i]);
+  });
+  // leafy clusters: a dark rounded blob, a mid layer and a few light leaves on top, bigger for the crown
+  for (const [cxp, cyp, size, i] of crowns) {
+    const w = size === 3 ? 16 : 11, h = size === 3 ? 12 : 9, x = cxp - Math.floor(w / 2), y = cyp - Math.floor(h / 2);
+    L.push(r(x + 2, y, w - 4, h, dark), r(x, y + 2, w, h - 4, dark), r(x + 2, y + 1, w - 5, h - 4, mid), r(x + 1, y + 3, w - 4, h - 6, mid),
+      r(x + 3, y + 1, 3, 2, lite), r(x + w - 6, y + 3, 3, 2, lite), r(x + 4 + (i % 3), y + h - 4, 2, 2, lite));
+    if (shipped >= 30 && !droop) L.push(r(x + 2 + ((i * 5) % (w - 4)), y + 1 + (i % 2) * 3, 3, 3, "#f5c2e7").loop("opacity", { from: 0.55, to: 1, period: 1600 + i * 170, easing: "ease-in-out" }));
+  }
+  // the pot
+  L.push(r(px + 2, base - 18, 24, 18, "#8a5a3c"), r(px, base - 18, 28, 4, "#a06c48"), r(px + 4, base - 14, 20, 1, "#6f472f"));
 
   // The tech corner, with the office's load on the rack.
   L.push(...ledWall(Lo.rackX, Lo.rackW, base, Boolean(opts.music), Math.max(0, opts.load ?? 0)));
