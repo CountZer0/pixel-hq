@@ -69,20 +69,24 @@ const sortOf = () => SORTS.find((s) => s.id === shared("agents.sort")) ?? SORTS[
 const SECTION = { 4: "Needs you", 3: "Done", 2: "Working", 1: "Idle" };
 const SECTION_STATUS = { 4: "blocked", 3: "done", 2: "working" };
 
-// How much is going on at each desk. Interns: Hermes' running sub-agents (agent.threads, from its plugin) and, for any agent,
-// the live child terminals it started with `hc run` (each in its own species and mood). Server rack: Hermes' shell work
-// (agent.jobs: commands in flight plus background processes; agent.jobs_long: those past a minute).
+// How much is going on at each desk, from any agent that reports it: Hermes through its plugin, Claude Code through a hook
+// (see README). Interns: running sub-agents (agent.threads) plus the live child terminals the agent started with `hc run`
+// (each in its own species and mood). Runners and the server rack: shell work (agent.jobs: commands in flight plus background
+// processes). A job turns amber past a minute: agent.jobs_long says how many, or agent.jobs_started lists start times (ms)
+// for reporters that only run when a job starts or ends.
 function activityAll(all) {
   return new Map(all.map((k) => {
     const labels = k.labels ?? {};
     const n = (v) => { const x = Number.parseInt(v, 10); return Number.isFinite(x) && x > 0 ? x : 0; };
-    const hermes = progOf(k).toLowerCase() === "hermes";
     const kids = all.filter((c) => c.parent === k.address && c.state === "live");
     const interns = [
-      ...Array.from({ length: hermes ? Math.min(n(labels["agent.threads"]), 50) : 0 }, () => ({ status: "working", species: speciesOf("hermes") })),
+      ...Array.from({ length: Math.min(n(labels["agent.threads"]), 50) }, () => ({ status: "working", species: speciesOf(progOf(k)) })),
       ...kids.map((c) => ({ status: String(c.status?.state ?? c.status ?? "idle"), species: speciesOf(progOf(c)) })),
     ];
-    return [k.address, { interns, jobs: hermes ? n(labels["agent.jobs"]) : 0, long: hermes ? n(labels["agent.jobs_long"]) : 0 }];
+    const jobs = Math.min(n(labels["agent.jobs"]), 99);
+    const now = Date.now();
+    const aged = String(labels["agent.jobs_started"] ?? "").split(",").filter((t) => { const ms = Number(t); return ms > 0 && now - ms > 60000; }).length;
+    return [k.address, { interns, jobs, long: Math.min(jobs, Math.max(n(labels["agent.jobs_long"]), aged)) }];
   }));
 }
 
@@ -1640,6 +1644,30 @@ export default class Agents extends View {
           return el.child(div().absolute().left(petW + kk(2)).top(rackTop).w(kk(9)).h(rackH).rounded(2).bg("#161827").border_1().border_color("#2e3250")
             .child(div().absolute().left(kk(2)).top(rackH - kk(4)).w(kk(5)).h(kk(1)).bg("#2e3250"))
             .children(leds));
+        })
+        // Runners: a little helper bot per running shell job (three at most, then "+N"), pacing the floor between the desk and
+        // the rack with a parcel, hopping as it goes; amber once its job has run over a minute. All motion is native loops.
+        .when(act.jobs > 0, (el) => {
+          // Sized like an intern (13 units tall), on the floor below the desk, clear of the interns at its front.
+          const u = Math.max(1.4, (PET * 0.4) / 13), ru = (v) => Math.round(v * u);
+          const rh = ru(13), floor = PET * 0.84 + kk(22) - rh + kk(13), shown = Math.min(act.jobs, 3), extra = act.jobs - shown;
+          const x0 = ctr - ru(4), x1 = petW + kk(4);
+          const bot = (i) => {
+            const c = i < act.long ? "#f9b84a" : "#a6e3a1", leg = 150 + i * 30;
+            return div().absolute().left(x0).top(floor + (i % 2) * ru(2))
+              .loop("left", { from: i % 2 ? x1 : x0, to: i % 2 ? x0 : x1, period: 1700 + i * 600, easing: "ease-in-out" })
+              .child(div().absolute().left(0).top(0).w(ru(9)).h(rh).loop("top", { from: 0, to: -ru(2), period: 320 + i * 40, easing: "ease-out" })
+                .child(div().absolute().left(ru(1)).top(0).w(ru(7)).h(ru(6)).rounded(2).bg(c))
+                .child(div().absolute().left(ru(2)).top(ru(2)).w(ru(5)).h(ru(2)).bg("#1e2030")
+                  .child(div().absolute().left(ru(1)).top(0).w(ru(1)).h(ru(2)).bg(c).loop("left", { from: 0, to: ru(3), period: 900, easing: "linear" })))
+                .child(div().absolute().left(ru(2)).top(ru(6)).w(ru(5)).h(ru(4)).bg("#585e82"))
+                .child(div().absolute().left(ru(4)).top(ru(5)).w(ru(5)).h(ru(4)).rounded(1).bg("#e9d8b4").border_1().border_color("#a8946a"))
+                .child(div().absolute().left(ru(2)).top(ru(10)).w(ru(2)).bg("#2b2f45").loop("height", { from: ru(1), to: ru(3), period: leg, easing: "linear" }))
+                .child(div().absolute().left(ru(5)).top(ru(10)).w(ru(2)).bg("#2b2f45").loop("height", { from: ru(3), to: ru(1), period: leg, easing: "linear" })));
+          };
+          return el.children(Array.from({ length: shown }, (_, i) => bot(i)))
+            .when(extra > 0, (e2) => e2.child(div().absolute().left(x1 + ru(4)).top(floor + ru(3)).px(2).rounded(3)
+              .bg("#0f111acc").text_size(Math.max(8, kk(9))).text_color("#cdd6f4").child(`+${extra}`)));
         })
         // Interns in front of the desk, one tiny pet per running sub-agent (three at most, then "+N").
         .when(act.interns.length > 0, (el) => {
