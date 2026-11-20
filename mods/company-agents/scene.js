@@ -167,7 +167,10 @@ export function sceneLayout(W, H) {
   const cx = two ? x0 + wA + Math.floor(gap / 2) : snap(W * 0.5), cr = Math.min(14, Math.floor(gap / 2) - 2) || 14;
   const rr = Math.max(8, cr);
   const sign = gap >= 44 && base - 48 >= 88 ? { x: cx - 16, y: 48, w: 32, h: 32 } : null;
-  return { W, H, yH, base, rackX, rackW, rackCab, rackTop, cw, wins, buildings, two, cx, cy: 26, rr, sign,
+  // The board: a dot-matrix strip on the wall under the windows, between the plant and the water cooler, when there is room.
+  const sill = winY + winH + 4, bx = x0 - 2, bw = cw - 8 - bx, bh = 16;
+  const board = base - sill >= 30 && bw >= 96 ? { x: bx, y: snap(sill + Math.max(6, (base - sill - bh) / 2 - 4)), w: bw, h: bh } : null;
+  return { W, H, yH, base, rackX, rackW, rackCab, rackTop, cw, wins, buildings, two, cx, cy: 26, rr, sign, board,
     cooler: { x: cw, y: base - 54, w: 20, h: 54 }, plant: { x: 0, y: base - 84, w: 36, h: 84 } };
 }
 
@@ -234,15 +237,13 @@ export function scene(W, H, opts = {}) {
   L.push(...ellipse(cx, cy, rr, rr, "#8e94b2"), ...ellipse(cx, cy, rr - 4, rr - 4, "#d8dcee"),
     ...hand(rr - 5, (mins / 60) * 2 * Math.PI, "#2a2d44", 2), ...hand(Math.max(3, rr - 8), (hrs / 12) * 2 * Math.PI, "#2a2d44", 3), r(cx - 2, cy - 2, 4, 4, "#c0424e"));
 
-  // The sign under the clock: how many agents need you (red, blinking), or a green check when nobody does.
-  if (Lo.sign) {
-    const { x, y, w, h } = Lo.sign, n = opts.needYou ?? 0;
-    if (n > 0) {
+  // The sign under the clock: how many agents need you (red, blinking). Nothing when nobody does; the board has the rest.
+  if (Lo.sign && (opts.needYou ?? 0) > 0) {
+    const { x, y, w, h } = Lo.sign, n = opts.needYou;
+    {
       L.push(r(x - 2, y - 2, w + 4, h + 4, "#f38ba8").loop("opacity", { from: 0.35, to: 1, period: 900, easing: "ease-in-out" }), r(x, y, w, h, "#3b1d2b"),
         div().absolute().left(x).top(y).w(w).h(h - 6).flex().items_center().justify_center().font_family("JetBrains Mono").font_bold().text_size(n > 9 ? 13 : 16).text_color("#f38ba8").child(n > 99 ? "99+" : String(n)),
         div().absolute().left(x).top(y + h - 11).w(w).h(9).flex().items_center().justify_center().font_family("JetBrains Mono").font_bold().text_size(6.5).text_color("#f5c2e7").child("NEED YOU"));
-    } else {
-      L.push(r(x, y, w, h, "#2a2f4a"), ...[[6, 16], [10, 20], [14, 16], [18, 12], [22, 8]].map(([dx, dy]) => r(x + dx, y + dy, 4, 4, "#a6e3a199")));
     }
   }
 

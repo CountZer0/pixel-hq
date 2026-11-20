@@ -3,7 +3,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, appHome, exec, readTextFile, writeTextFile, nextCommand, hc, knownAgents, checking } from "herdr";
+import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, settings, openOverlay, closeOverlay, props, window, layout, appHome, exec, readTextFile, writeTextFile, nextCommand, hc, knownAgents, checking } from "herdr";
 import { figureFor, load } from "./figures.js";
 import { agentOf, speciesOf, duckWidth, duckMood, mood, DUCK_CENTER, IDLE_SNOOZE, IDLE_URGE } from "./duck.js";
 import { scene, sceneLayout, yHorizon } from "./scene.js";
@@ -409,6 +409,9 @@ export default class Agents extends View {
     });
     // Each agent's last state and when it changed (ms), kept across restarts.
     this.changed = JSON.parse(localStorage.getItem("changed") ?? "{}");
+    // The board's ticker: the last few things that happened (a desk shipped, a desk needs you), newest first.
+    try { this.events = JSON.parse(localStorage.getItem("events") ?? "[]"); } catch { this.events = []; }
+    if (!Array.isArray(this.events)) this.events = [];
     try { this.today = JSON.parse(localStorage.getItem("today") ?? "null"); } catch { this.today = null; }
     if (!this.today || this.today.day !== dayKey()) this.today = freshDay();
     if (JSON.stringify(shared("pixel-hq.today")) !== JSON.stringify(this.today)) setShared("pixel-hq.today", this.today);
@@ -432,6 +435,7 @@ export default class Agents extends View {
       const prev = this.changed[a.address];
       if (prev?.s === s) continue;
       if (prev?.s === "working") this.tally(a, s, prev.at, now);
+      if (prev && (s === "blocked" || (prev.s === "working" && s === "idle"))) this.logEvent(a, s === "blocked" ? "needs" : "shipped", now);
       this.changed[a.address] = { s, at: now };
       dirty = true;
     }
@@ -443,6 +447,12 @@ export default class Agents extends View {
     try { localStorage.setItem("changed", JSON.stringify(this.changed)); } catch { /* storage blocked: the shared stamps still carry for this session */ }
     // The floor copy and the needs-you popup are separate copies with separate storage: share the stamps so the popup sorts truthfully.
     setShared("pixel-hq.changed", this.changed);
+  }
+
+  logEvent(a, kind, at) {
+    const who = String(a.space_name || a.program?.name || a.address).toUpperCase(), prog = String(a.program?.name || "").toUpperCase();
+    this.events = [{ who, prog, kind, at, addr: a.address }, ...this.events].slice(0, 6);
+    try { localStorage.setItem("events", JSON.stringify(this.events)); } catch { /* storage blocked: kept in memory */ }
   }
 
   // An agent stopped working: add its time to today (counted from midnight at most, six hours at most) and, if it finished
@@ -845,7 +855,8 @@ export default class Agents extends View {
     out.push(spot("wall-clock", Lo.cx - Lo.rr, Lo.cy - Lo.rr, Lo.rr * 2, Lo.rr * 2, "Today: tasks shipped, time at work, busiest floor", openToday));
     if (!Lo.sign && o.needYou > 0) out.push(spot("wall-badge", Lo.cx + Lo.rr - 6, Lo.cy + Lo.rr - 8, 12, 10,
       `${o.needYou} ${o.needYou > 1 ? "agents need" : "agent needs"} you · click to see who`, () => this.openNeedsYou()));
-    if (Lo.sign) out.push(spot("wall-sign", Lo.sign.x, Lo.sign.y, Lo.sign.w, Lo.sign.h,
+    if (Lo.board) out.push(this.wallBoard(Lo.board, o, spot));
+    if (Lo.sign && o.needYou) out.push(spot("wall-sign", Lo.sign.x, Lo.sign.y, Lo.sign.w, Lo.sign.h,
       o.needYou ? `${o.needYou} ${o.needYou > 1 ? "agents need" : "agent needs"} you · click to see who` : "Nobody needs you right now", () => this.openNeedsYou()));
     out.push(spot("wall-rack", Lo.rackX, Lo.rackTop, Lo.rackCab, Lo.base - Lo.rackTop,
       o.load ? `${o.load} running across the office (sub-agents and shell jobs) · click for the list` : "Nothing running in the background · click for the list", () => this.openWorkload()));
@@ -859,6 +870,67 @@ export default class Agents extends View {
     out.push(spot("wall-plant", Lo.plant.x, Lo.plant.y, Lo.plant.w, Lo.plant.h,
       `${o.shipped} task${o.shipped === 1 ? "" : "s"} shipped today${o.droop ? " · drooping: someone has waited on you for over 5 minutes" : ""}`, openToday));
     return out;
+  }
+
+  // The board under the windows: a fuel gauge for the lowest usage window left, and an amber dot-matrix panel cycling through
+  // what just happened, today's score and any context running full. Red, and still, while someone needs you. Native frames only.
+  wallBoard(B, o, spot) {
+    const d = o.board ?? {}, now = Date.now();
+    const ago = (t) => { const m = Math.max(0, Math.round((now - t) / 60000)); return m < 1 ? "NOW" : m < 60 ? `${m}M` : `${Math.floor(m / 60)}H`; };
+    const hm = (ms) => { const m = Math.round(ms / 60000); return m < 60 ? `${m}M` : `${Math.floor(m / 60)}H${String(m % 60).padStart(2, "0")}M`; };
+    const fuel = d.fuel?.[0] ?? null;
+    const gw = fuel ? 24 : 0, tx = B.x + gw + 5, tw = B.w - gw - 8;
+    const fit = Math.max(8, Math.floor((tw - 2) / 4.55));
+    const needs = o.needYou > 0;
+    const panels = needs
+      ? [`! ${[...new Set(d.blocked ?? [])].filter(Boolean).join(", ") || `${o.needYou}`} NEED${o.needYou > 1 ? "" : "S"} YOU`]
+      : [
+          ...(d.events ?? []).filter((e) => now - e.at < 6 * 3600000).slice(0, 3).map((e) => `${e.who} ${e.kind === "shipped" ? "SHIPPED" : "WAITED"} ${ago(e.at)}`),
+          `${o.shipped ?? 0} SHIPPED TODAY`,
+          ...((d.workMs ?? 0) >= 60000 ? [`${hm(d.workMs)} AT WORK`] : []),
+          ...(d.hot ?? []).slice(0, 2).map((h) => `${h.who} CONTEXT ${h.p}%`),
+          ...(o.load ? [`${o.load} HELPER${o.load > 1 ? "S" : ""} AT WORK`] : []),
+        ];
+    // Short panels hold for 3 s; long ones scroll through once, then hold. 250 ms a frame.
+    const frames = [];
+    for (const raw of panels) {
+      const t = raw.replace(/\s+/g, " ").trim();
+      if (t.length <= fit) { for (let i = 0; i < 12; i++) frames.push(t); continue; }
+      const head = t.slice(0, fit);
+      for (let i = 0; i < 6; i++) frames.push(head);
+      for (let i = 1; i <= t.length - fit; i++) frames.push(t.slice(i, i + fit));
+      for (let i = 0; i < 6; i++) frames.push(t.slice(t.length - fit));
+    }
+    const ink = needs ? "#f38ba8" : "#f9b84a";
+    const text = div().absolute().left(tx).top(B.y + 3).w(tw).h(B.h - 6).overflow_hidden().flex().items_center()
+      .font_family("JetBrains Mono").font_bold().text_size(7.5).text_color(ink);
+    const shown = frames.length > 1 ? text.frames(frames.slice(0, 600), 250) : text.child(frames[0] ?? "");
+    const fc = fuel ? (fuel.q <= 10 ? "#f38ba8" : fuel.q <= 25 ? "#f9b84a" : "#a6e3a1") : null;
+    const gauge = fuel ? [
+      // five segments, 20% each
+      ...Array.from({ length: 5 }, (_, i) => {
+        const lit = i < Math.ceil(fuel.q / 20);
+        const seg = div().absolute().left(B.x + 3 + i * 4).top(B.y + 4).w(3).h(B.h - 8).bg(lit ? fc : "#2a2e48");
+        return lit && fuel.q <= 10 ? seg.loop("opacity", { from: 0.3, to: 1, period: 700, easing: "ease-in-out" }) : seg;
+      }),
+      div().absolute().left(B.x + gw + 1).top(B.y + 3).w(1).h(B.h - 6).bg("#2e3250"),
+    ] : [];
+    const fuelTip = (d.fuel ?? []).map((f) => `${f.who} ${f.q}% left${f.reset ? ` (resets ${new Date(f.reset).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })})` : ""}`).join(" · ");
+    const tip = [...panels.map((p) => p.charAt(0) + p.slice(1).toLowerCase()), fuelTip ? `Usage window: ${fuelTip}` : null].filter(Boolean).join("\n");
+    const board = div().absolute().left(0).top(0).w(B.x + B.w + 4).h(B.y + B.h + 4)
+      // the bezel, a dark face with faint scanlines, two bolts
+      .child(div().absolute().left(B.x - 2).top(B.y - 2).w(B.w + 4).h(B.h + 4).rounded(2).bg("#0a0c1a"))
+      .child(div().absolute().left(B.x).top(B.y).w(B.w).h(B.h).bg("#14110c").border_1().border_color(needs ? "#5a2234" : "#3a2f1c"))
+      .when(needs, (el) => el.child(div().absolute().left(B.x - 2).top(B.y - 2).w(B.w + 4).h(B.h + 4).rounded(2).border_1().border_color("#f38ba8")
+        .loop("opacity", { from: 0.2, to: 1, period: 900, easing: "ease-in-out" })))
+      .children(gauge)
+      .child(shown)
+      .children([4, 8, 12].map((y) => div().absolute().left(B.x + 1).top(B.y + y).w(B.w - 2).h(1).bg("#00000033")))
+      .child(div().absolute().left(B.x + 1).top(B.y - 5).w(2).h(2).bg("#6b7194"))
+      .child(div().absolute().left(B.x + B.w - 3).top(B.y - 5).w(2).h(2).bg("#6b7194"));
+    const openToday = () => openOverlay({ mod: "company-agents", kind: "popup", width: 300, height: 214, props: { today: true } });
+    return spot("wall-board", B.x - 2, B.y - 6, B.w + 4, B.h + 8, tip, () => (needs ? this.openNeedsYou() : openToday()))
+      .child(board.left(-(B.x - 2)).top(-(B.y - 6)));
   }
 
   openWorkload() {
@@ -1752,6 +1824,20 @@ export default class Agents extends View {
       load: officeLoad,
       shipped: todayNow.shipped,
       droop: blockedAll.some((a) => this.waitOf(a.address, a.status, now) >= 300000),
+      board: {
+        events: this.events ?? [],
+        workMs: todayNow.workMs,
+        blocked: blockedAll.map((a) => String(a.space_name || a.program?.name || "").toUpperCase()),
+        // Fuel: the lowest usage window left across agents that report one (Claude Code's 5-hour window, Antigravity, Codex).
+        fuel: all.flatMap((k) => {
+          const q = contextOf.get(k.address)?.quota;
+          if (q == null || k.state !== "live") return [];
+          const fam = progOf(k).toLowerCase(), reset = Number(k.labels?.["claude.quota_reset"]);
+          return [{ q, who: /claude/.test(fam) ? "CLAUDE" : /codex/.test(fam) ? "CODEX" : /agy|antigravity/.test(fam) ? "AGY" : fam.toUpperCase(), reset: reset > 0 ? reset * 1000 : null }];
+        }).sort((x, y) => x.q - y.q),
+        hot: everyone.flatMap((a) => { const p = contextOf.get(a.address)?.pct; return p != null && p >= 80 ? [{ who: String(a.space_name || a.program?.name || "").toUpperCase(), p, addr: a.address }] : []; })
+          .sort((x, y) => y.p - x.p),
+      },
     };
     const farm = div().id("farm-area").relative().flex_1().min_h(0).overflow_hidden()
       .on_mouse_move((e, cx) => {
@@ -1759,15 +1845,19 @@ export default class Agents extends View {
         if (!d) return;
         if (!d.moved && Math.hypot(e.position.x - d.sx, e.position.y - d.sy) < 4) return;
         d.moved = true;
-        const x = Math.max(0, Math.min(sz.width - petW, e.local_position.x - d.dx));
-        const y = Math.max(0, Math.min(sz.height - PET - 34, e.local_position.y - d.dy));
+        const z = Number(settings()?.zoom) > 0 ? Number(settings().zoom) : 1;
+        const x = Math.max(0, Math.min(sz.width - petW, (e.local_position.x - d.dx) / z));
+        const y = Math.max(0, Math.min(sz.height - PET - 34, (e.local_position.y - d.dy) / z));
         this.petpos[d.addr] = [x / sz.width, y / sz.height];
         cx.notify();
       })
       .on_mouse_up("left", (_e, cx) => endDrag(cx))
       .on_mouse_down("right", () => { this.petpos = {}; localStorage.removeItem("petpos"); })
+      // Sizes arrive in window pixels, but everything drawn here is in the mod's own units, which Herdr scales by the zoom: divide
+      // it out, or at zoom 1.2 the wall is drawn 20% too wide and its right corner (rack and monitor desk) falls off the edge.
       .on_size_change((s, cx) => {
-        if (!this.size || Math.abs(s.width - this.size.width) > 2 || Math.abs(s.height - this.size.height) > 2) { this.size = s; cx.notify(); }
+        const z = Number(settings()?.zoom) > 0 ? Number(settings().zoom) : 1, w = s.width / z, h = s.height / z;
+        if (!this.size || Math.abs(w - this.size.width) > 2 || Math.abs(h - this.size.height) > 2) { this.size = { width: w, height: h }; cx.notify(); }
       })
       .child(scene(sz.width, sz.height, sceneOpts))
       .children(this.sceneSpots(sz, everyone, sceneOpts))
