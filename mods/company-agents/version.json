@@ -1,5 +1,5 @@
 {
-  "version": "1.8.1",
+  "version": "1.8.2",
   "type": "normal",
-  "notes": "Click a pane header's name or role to rename it"
+  "notes": "Renamed agents show their new name on the office desks; README and screenshot refreshed"
 }

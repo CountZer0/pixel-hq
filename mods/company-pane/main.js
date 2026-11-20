@@ -1,7 +1,7 @@
 // A desk nameplate as the pane header: the agent's pixel pet, its job title, status and folder.
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, InputState, Input } from "gpui-base";
-import { panes, props, run, theme, home, layout } from "herdr";
+import { panes, props, run, theme, home, layout, shared, setShared, appHome, readTextFile, writeTextFile } from "herdr";
 import { agentOf, duckMood, duckWidth, mood } from "./duck.js";
 
 const ROLE = (p) => agentOf(p.program?.key)?.role ?? (p.program?.shell ? "Terminal" : (p.program?.name ?? "Contractor"));
@@ -28,8 +28,13 @@ export default class CompanyPane extends View {
   init(_props, cx) {
     this.hovered = false;
     this.editing = null;
-    try { this.names = JSON.parse(localStorage.getItem("names") ?? "{}"); } catch { this.names = {}; }
-    if (!this.names || typeof this.names !== "object" || Array.isArray(this.names)) this.names = {};
+    this.file = `${appHome()}/pixel-hq-names.json`;
+    // Shared with the office list, so a new name shows there too; the file keeps it across restarts.
+    cx.spawn(async (cx) => {
+      if (shared("pixel-hq.names")) return;
+      const raw = await readTextFile(this.file).catch(() => null);
+      try { const v = JSON.parse(raw ?? "{}"); if (v && typeof v === "object" && !shared("pixel-hq.names")) { setShared("pixel-hq.names", v); cx.notify(); } } catch {}
+    });
     this.input = InputState.new({ placeholder: "" });
     this.input.on("submit", (_e, cx) => this.commit(cx));
     this.input.on("blur", (_e, cx) => { if (this.editing) { this.editing = null; cx.notify(); } });
@@ -47,10 +52,13 @@ export default class CompanyPane extends View {
     const e = this.editing;
     if (!e) return;
     const v = this.input.value().trim().slice(0, 40);
-    const mine = { ...(this.names[e.pane] ?? {}) };
+    const names = { ...(shared("pixel-hq.names") ?? {}) };
+    const mine = { ...(names[e.pane] ?? {}) };
     if (v) mine[e.field] = v; else delete mine[e.field];
-    if (Object.keys(mine).length) this.names[e.pane] = mine; else delete this.names[e.pane];
-    try { localStorage.setItem("names", JSON.stringify(this.names)); } catch {}
+    if (Object.keys(mine).length) names[e.pane] = mine; else delete names[e.pane];
+    setShared("pixel-hq.names", names);
+    const text = JSON.stringify(names, null, 2);
+    cx.spawn(async () => { const raw = await readTextFile(this.file).catch(() => null); await writeTextFile(this.file, text, raw).catch(() => {}); });
     this.editing = null;
     cx.notify();
   }
@@ -76,7 +84,7 @@ export default class CompanyPane extends View {
     const avatar = species
       ? div().flex_none().w(duckWidth(H)).h(H).child(duckMood(mood(st ?? "idle"), H, { species }))
       : div().flex_none().size(24).rounded(6).bg(t.raised).flex().items_center().justify_center().text_size(12).text_color(t.muted).child(">_");
-    const custom = this.names[pane] ?? {};
+    const custom = (shared("pixel-hq.names") ?? {})[pane] ?? {};
     const title = custom.name ?? ((((p.program?.agent || p.program?.shell) && p.program.name) || p.title || p.program?.name) || "shell");
     const chip = (text, color, spin) => h_flex().flex_none().gap(5).px(8).h(20).items_center().rounded(10).bg(color + "26").text_size(10.5).font_semibold().text_color(color)
       .when(Boolean(spin), el => el.child(svg("mods/workspace-chrome/spinner.svg").size(11).flex_none().text_color(color).spin(900)))

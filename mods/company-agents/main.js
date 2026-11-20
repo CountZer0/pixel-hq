@@ -291,6 +291,16 @@ export default class Agents extends View {
     });
     reload(cx);
     cx.timer.every(4000, reload);
+    // Names and roles set from a pane header (company-pane writes this file), shared for the desk labels.
+    const namesFile = `${appHome()}/pixel-hq-names.json`;
+    const loadNames = (cx) => cx.spawn(async (cx) => {
+      const raw = await readTextFile(namesFile).catch(() => null);
+      if (raw === this.namesRaw) return;
+      this.namesRaw = raw;
+      try { const v = JSON.parse(raw ?? "{}"); if (v && typeof v === "object") { setShared("pixel-hq.names", v); cx.notify(); } } catch {}
+    });
+    loadNames(cx);
+    cx.timer.every(3000, loadNames);
     this.folded = new Set();
     // Where the person dragged each pet: fractions of the panel, kept across restarts.
     try { this.petpos = JSON.parse(localStorage.getItem("petpos") ?? "{}"); } catch { this.petpos = {}; }
@@ -1275,7 +1285,7 @@ export default class Agents extends View {
       // Under a space header the space goes without saying; an automatic tab number says nothing.
       // Without a space header above (priority, pinned) the row names its space.
       const full = byPriority || isPinned;
-      const name = full ? a.space_name || label(a) : more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a));
+      const name = (shared("pixel-hq.names") ?? {})[a.pane]?.name ?? (full ? a.space_name || label(a) : more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a)));
       return h_flex()
         .id(`ag-${a.address}`)
         .pl(4)
@@ -1389,7 +1399,7 @@ export default class Agents extends View {
       } else localStorage.setItem("petpos", JSON.stringify(this.petpos));
       cx.notify();
     };
-    const ROLES = (a) => (agentOf(a.program?.key)?.role ?? "").toLowerCase();
+    const ROLES = (a) => ((shared("pixel-hq.names") ?? {})[a.pane]?.role ?? agentOf(a.program?.key)?.role ?? "").toLowerCase();
     const STATE = { working: "typing working busy", idle: "idle break coffee snooze urge sleeping", done: "shipped done finished", blocked: "needs you blocked waiting" };
     const q = this.query.trim().toLowerCase();
     const hitOf = (a) => !q || q.split(/\s+/).every((w) => [detail.get(a.address), a.space_name, label(a), a.program?.name, ROLES(a), STATE[a.status]].join(" ").toLowerCase().includes(w));
@@ -1420,7 +1430,7 @@ export default class Agents extends View {
       const ctxPct = ctx?.pct ?? null;
       const modelTxt = ctx ? modelOf(ctx) : "";
       const more = detail.get(a.address);
-      const text = more ?? a.space_name ?? label(a);
+      const text = (shared("pixel-hq.names") ?? {})[a.pane]?.name ?? more ?? a.space_name ?? label(a);
       // The desk's branch (its own worktree, ideally) and whether another desk is about to step on it.
       const branch = paneBy.get(a.pane)?.branch ?? null;
       const cl = this.clash.get(a.address) ?? null;

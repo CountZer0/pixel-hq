@@ -18,7 +18,7 @@
 ## Ảnh chụp thật
 
 <p align="center">
-  <img src="screenshot.png?v=7" alt="Pixel HQ đang làm việc: đường tàu các tầng, văn phòng với sáu agent (Claude Code, Codex, OpenCode, Antigravity) đang làm việc trong lưới pane, bảng tên trên mọi pane và thanh trạng thái của team" width="900"><br>
+  <img src="screenshot.png?v=8" alt="Pixel HQ đang làm việc: đường tàu các tầng, văn phòng với sáu agent (Claude Code, Codex, OpenCode, Antigravity) đang làm việc trong lưới pane, bảng tên trên mọi pane và thanh trạng thái của team" width="900"><br>
   <sub>Cả văn phòng đang làm việc: hai Claude Code, hai Codex (một con đang chờ bạn), một OpenCode và một Antigravity, mỗi agent một git worktree, giấy tờ chất dần trên bàn (dữ liệu demo).</sub>
 </p>
 
@@ -40,7 +40,12 @@
 - **Cần bạn, chỉ một danh sách.** Ngay khi có agent ở bất kỳ tầng hay máy nào chờ bạn, một chiếc chuông pixel hiện lên trong header kèm số đếm (pill `N need you` trên thanh trạng thái cũng mở danh sách đó, và trên macOS badge Dock hiển thị con số). Click vào: hộp "needs-you" liệt kê mọi agent đang chờ trên mọi space và máy, lâu nhất trước — thú cưng, tiêu đề terminal, tầng làm việc, chương trình và đã chờ bao lâu. Click một dòng là nhảy thẳng tới pane của nó.
 - **Nhân viên đã ship có thể "clock out".** Mỗi bàn ship xong được một nút `✓` xanh lá ở góc trên-trái. Click vào, pet sẽ được "settle" tới khi nhận task tiếp theo: bàn biến mất khỏi tầng và pháo giấy dừng rơi. Nó tự quay lại ngay khi nó hoạt động hoặc cần bạn, và một chip `✓ N settled` trong văn phòng mang mọi người trở lại cùng lúc.
 - **Tìm nhân viên.** Ô tìm kiếm phía trên văn phòng: gõ tên, chức danh (`reviewer`, `engineer`), trạng thái (`typing`, `break`) hoặc tên space, ai không khớp sẽ mờ đi còn ai khớp sẽ có bảng tên màu vàng. Nhấn Enter để nhảy tới kết quả đầu tiên.
-- **Pixel MusicBox & Đài Radio.** Chiếc đài retro nhỏ nhắn nằm ở góc công nghệ trong văn phòng, các nốt nhạc pixel `♪ ♫` bay lên lơ lửng khi đang phát nhạc. Nhấp chuột vào chiếc đài hoặc nút `📻 MusicBox` trên thanh trạng thái để mở MusicBox: dán link YouTube, SoundCloud hoặc luồng audio trực tiếp (.mp3, .m3u8, radio Icecast) hoặc chọn nhanh từ các đài chill có sẵn (SomaFM, Nightwave Plaza, DEF CON Radio). Phát luồng audio ngầm qua `ffplay` hoặc `mpv` mà không mở trình duyệt hay dựng hình video, siêu nhẹ.
+- **Pixel MusicBox & Đài Radio.** Chiếc đài retro nhỏ nhắn nằm ở góc công nghệ trong văn phòng, các nốt nhạc pixel `♪ ♫` bay lên lơ lửng khi đang phát nhạc. Nhấp chuột vào chiếc đài hoặc nút `MUSICBOX` trên thanh trạng thái để mở MusicBox: dán link YouTube, SoundCloud hoặc luồng audio trực tiếp (.mp3, .m3u8, radio Icecast) hoặc chọn nhanh từ các đài chill có sẵn (SomaFM, Nightwave Plaza, DEF CON Radio). Phát luồng audio ngầm qua `ffplay` hoặc `mpv` mà không mở trình duyệt hay dựng hình video, siêu nhẹ.
+- **Thanh tab pixel.** Các tab, nút `+` và nút `FILES` / `CHANGES` đều vẽ kiểu hộp pixel có bóng đổ cứng. Tab đang chọn có khung nhẹ và vạch xanh bên dưới. Agent đang chạy hiện vòng xoay pixel ngay trên tab, agent xong hoặc bị chặn hiện dấu tick hoặc `!`. Lăn chuột trên thanh để đổi tab, kéo tab để di chuyển.
+- **Đổi tên và role.** Bấm vào tên hoặc chức danh trên header của pane để sửa (Enter để lưu, để trống thì về mặc định). Tên mới cũng hiện trên bàn của agent đó trong văn phòng, và role mới được tìm thấy khi dùng Find staff. Tên được lưu theo từng pane trong `pixel-hq-names.json` ở thư mục cấu hình Herdr.
+- **Floor Switcher.** Nhấn `Ctrl+P` (hoặc `Cmd+P`) để nhảy giữa các tầng: gõ để tìm, dùng phím mũi tên hoặc `1`-`9`, hoặc giữ `Ctrl` và nhấn `P` liên tục để chuyển vòng.
+- **Bảng phím tắt.** Nút `HOTKEYS` trên thanh trạng thái mở bảng tra cứu (chỉ đọc) các phím tắt cho tầng, pane và layout.
+- **Thanh trạng thái kiểu pixel.** Các nút MusicBox, Switcher, Hotkeys và bảng lệnh là nút pixel. Bấm chuột phải vào nút MusicBox để ẩn nó khỏi thanh; mở MusicBox nhanh bằng `Ctrl+Shift+M`.
 - **Thanh trạng thái của team.** "Pixel HQ", team có bao nhiêu agent, và bao nhiêu agent đang gõ, đang chờ bạn, đã ship hoặc đang nghỉ giải lao.
 - **Biển hiệu công ty.** Logo chú corgi của Pixel HQ cùng dòng "Pixel HQ / engineering floor" ở đầu sidebar.
 - **Bảng màu Catppuccin Mocha** với điểm nhấn xanh dương dịu, đi kèm một theme terminal cùng tông.
