@@ -82,7 +82,7 @@
           "id": "tabs",
           "type": "block",
           "content": {
-            "mod": "tabs"
+            "mod": "company-tabs"
           },
           "size": {
             "px": 42

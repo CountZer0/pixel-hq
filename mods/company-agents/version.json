@@ -1,5 +1,5 @@
 {
-  "version": "1.7.11",
+  "version": "1.8.0",
   "type": "normal",
-  "notes": "Translate all UI text, tooltips, and hotkey descriptions to English"
+  "notes": "Pixel tab bar with a spinning loader, pixel status bar"
 }

@@ -23,6 +23,8 @@ const PIXEL_HQ_FILES = [
   "mods/company-pane/split-right.svg",
   "mods/company-pane/unzoom.svg",
   "mods/company-pane/zoom.svg",
+  "mods/company-tabs/main.js",
+  "mods/company-tabs/mod.json",
   "mods/company-spaces/main.js",
   "mods/company-spaces/mod.json",
   "mods/company-status/main.js",
