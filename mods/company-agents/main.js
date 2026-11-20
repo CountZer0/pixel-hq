@@ -1726,8 +1726,9 @@ export default class Agents extends View {
           const x0 = ctr - ru(4), x1 = petW + kk(4);
           const bot = (i) => {
             const c = i < act.long ? "#f9b84a" : "#a6e3a1", leg = 150 + i * 30;
-            return div().absolute().left(x0).top(floor + (i % 2) * ru(2))
-              .loop("left", { from: i % 2 ? x1 : x0, to: i % 2 ? x0 : x1, period: 1700 + i * 600, easing: "ease-in-out" })
+            // Paced by an offset from x0, not absolute positions: Herdr doesn't scale loop values by the zoom.
+            return div().absolute().left(x0).top(floor + (i % 2) * ru(2)).w(x1 - x0 + ru(9)).h(rh)
+              .child(div().absolute().top(0).left(0).w(ru(9)).h(rh).loop("left", { from: i % 2 ? x1 - x0 : 0, to: i % 2 ? 0 : x1 - x0, period: 1700 + i * 600, easing: "ease-in-out" })
               .child(div().absolute().left(0).top(0).w(ru(9)).h(rh).loop("top", { from: 0, to: -ru(2), period: 320 + i * 40, easing: "ease-out" })
                 .child(div().absolute().left(ru(1)).top(0).w(ru(7)).h(ru(6)).rounded(2).bg(c))
                 .child(div().absolute().left(ru(2)).top(ru(2)).w(ru(5)).h(ru(2)).bg("#1e2030")
@@ -1735,7 +1736,7 @@ export default class Agents extends View {
                 .child(div().absolute().left(ru(2)).top(ru(6)).w(ru(5)).h(ru(4)).bg("#585e82"))
                 .child(div().absolute().left(ru(4)).top(ru(5)).w(ru(5)).h(ru(4)).rounded(1).bg("#e9d8b4").border_1().border_color("#a8946a"))
                 .child(div().absolute().left(ru(2)).top(ru(10)).w(ru(2)).bg("#2b2f45").loop("height", { from: ru(1), to: ru(3), period: leg, easing: "linear" }))
-                .child(div().absolute().left(ru(5)).top(ru(10)).w(ru(2)).bg("#2b2f45").loop("height", { from: ru(3), to: ru(1), period: leg, easing: "linear" })));
+                .child(div().absolute().left(ru(5)).top(ru(10)).w(ru(2)).bg("#2b2f45").loop("height", { from: ru(3), to: ru(1), period: leg, easing: "linear" }))));
           };
           return el.children(Array.from({ length: shown }, (_, i) => bot(i)))
             .when(extra > 0, (e2) => e2.child(div().absolute().left(x1 + ru(4)).top(floor + ru(3)).px(2).rounded(3)
@@ -1761,7 +1762,9 @@ export default class Agents extends View {
             .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
             .on_click((_e, cx) => { cx.stop_propagation(); this.pileClick(a, cx); })
             .children(sheets);
-          return el.child(full ? pile.loop("top", { from: PET * 0.84 - n * sh - kk(4), to: PET * 0.84 - n * sh - kk(6), period: 600, easing: "ease-in-out" }) : pile);
+          // A full pile bobs by a small offset inside a normally placed box (loop values aren't scaled by the zoom).
+          return el.child(full ? div().absolute().left(0).top(PET * 0.84 - n * sh - kk(6)).w(petW).h(n * sh + kk(8))
+            .child(pile.top(kk(2)).loop("top", { from: kk(2), to: 0, period: 600, easing: "ease-in-out" })) : pile);
         })
         .when(a.status === "done", (el) => el.child(div().id(`settle-${a.address}`).absolute().left(-kk(3)).top(-kk(13)).w(kk(13)).h(kk(13)).rounded(3)
           .bg("#a6e3a1").flex().items_center().justify_center().cursor_pointer()

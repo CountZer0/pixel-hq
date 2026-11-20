@@ -257,7 +257,9 @@ export function scene(W, H, opts = {}) {
   // The water cooler stands on the baseboard, left of the server rack; a bubble rises in its jug now and then.
   const cw = Lo.cw;
   L.push(r(cw + 2, base - 54, 16, 22, "#6fa8d6"), r(cw + 4, base - 52, 4, 10, "#a9d0ee"), r(cw, base - 32, 20, 32, "#b7bfd6"), r(cw, base - 32, 20, 4, "#d3d8ea"), r(cw + 8, base - 24, 4, 4, "#e8744f"),
-    r(cw + 10, base - 36, 2, 2, "#e6f2fb").loop("top", { from: base - 36, to: base - 52, period: 2600, easing: "ease-in" }));
+    // Loop values are kept small and relative to a normally placed lane: Herdr doesn't scale loop values by the zoom, so a loop over
+    // absolute wall heights drifts (at zoom 1.2 this bubble floated a jug's height above the cooler).
+    div().absolute().left(cw + 10).top(base - 52).w(2).h(18).child(r(0, 16, 2, 2, "#e6f2fb").loop("top", { from: 16, to: 0, period: 2600, easing: "ease-in" })));
 
   // The plant in the left corner is a little potted tree that grows with the work shipped today: a sapling with one leafy crown,
   // then a new branch with its own cluster of leaves at 1, 4, 8, 13, 19 and 26 tasks, and pink blossoms from 30. While someone has
