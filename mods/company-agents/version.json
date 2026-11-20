@@ -1,5 +1,5 @@
 {
-  "version": "1.8.0",
+  "version": "1.8.1",
   "type": "normal",
-  "notes": "Pixel tab bar with a spinning loader, pixel status bar"
+  "notes": "Click a pane header's name or role to rename it"
 }

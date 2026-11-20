@@ -1,6 +1,6 @@
 // A desk nameplate as the pane header: the agent's pixel pet, its job title, status and folder.
 import { View, div, svg, image } from "gpui-kit";
-import { h_flex } from "gpui-base";
+import { h_flex, InputState, Input } from "gpui-base";
 import { panes, props, run, theme, home, layout } from "herdr";
 import { agentOf, duckMood, duckWidth, mood } from "./duck.js";
 
@@ -25,7 +25,36 @@ function folder(cwd) {
 }
 
 export default class CompanyPane extends View {
-  init() { this.hovered = false; }
+  init(_props, cx) {
+    this.hovered = false;
+    this.editing = null;
+    try { this.names = JSON.parse(localStorage.getItem("names") ?? "{}"); } catch { this.names = {}; }
+    if (!this.names || typeof this.names !== "object" || Array.isArray(this.names)) this.names = {};
+    this.input = InputState.new({ placeholder: "" });
+    this.input.on("submit", (_e, cx) => this.commit(cx));
+    this.input.on("blur", (_e, cx) => { if (this.editing) { this.editing = null; cx.notify(); } });
+  }
+
+  // Click the name or the job title to rename it; an empty name restores the default.
+  start(field, pane, current, cx) {
+    this.editing = { field, pane };
+    this.input.set_value(current);
+    cx.notify();
+    cx.timer.after(40, () => this.input.focus());
+  }
+
+  commit(cx) {
+    const e = this.editing;
+    if (!e) return;
+    const v = this.input.value().trim().slice(0, 40);
+    const mine = { ...(this.names[e.pane] ?? {}) };
+    if (v) mine[e.field] = v; else delete mine[e.field];
+    if (Object.keys(mine).length) this.names[e.pane] = mine; else delete this.names[e.pane];
+    try { localStorage.setItem("names", JSON.stringify(this.names)); } catch {}
+    this.editing = null;
+    cx.notify();
+  }
+
   me() { return panes().find((p) => p.pane === props()?.pane); }
 
   button(t, id, icon, command, args) {
@@ -47,7 +76,8 @@ export default class CompanyPane extends View {
     const avatar = species
       ? div().flex_none().w(duckWidth(H)).h(H).child(duckMood(mood(st ?? "idle"), H, { species }))
       : div().flex_none().size(24).rounded(6).bg(t.raised).flex().items_center().justify_center().text_size(12).text_color(t.muted).child(">_");
-    const title = ((p.program?.agent || p.program?.shell) && p.program.name) || p.title || p.program?.name || "shell";
+    const custom = this.names[pane] ?? {};
+    const title = custom.name ?? ((((p.program?.agent || p.program?.shell) && p.program.name) || p.title || p.program?.name) || "shell");
     const chip = (text, color, spin) => h_flex().flex_none().gap(5).px(8).h(20).items_center().rounded(10).bg(color + "26").text_size(10.5).font_semibold().text_color(color)
       .when(Boolean(spin), el => el.child(svg("mods/workspace-chrome/spinner.svg").size(11).flex_none().text_color(color).spin(900)))
       .child(text);
@@ -55,6 +85,11 @@ export default class CompanyPane extends View {
       : st === "blocked" ? chip("needs you", t.blocked ?? "#e8744f")
       : st === "done" ? chip("shipped", t.done ?? "#8ec07c")
       : species ? chip("on break", t.dim ?? "#9a8f86") : null;
+    const edit = (field, el, width) => this.editing?.pane === pane && this.editing.field === field
+      ? div().id(`pe-${pane}-${field}`).flex_none().w(width).h(22).px(7).flex().items_center().rounded(5).border_1().border_color(t.accent)
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).child(Input.new(this.input).h_full().text_size(11.5).text_color(t.foreground))
+      : el.cursor_text().hover((s) => s.bg(t.hover)).tooltip("Click to rename")
+          .on_click((_e, cx) => { cx.stop_propagation(); this.start(field, pane, field === "role" ? (custom.role ?? ROLE(p)) : title, cx); });
     return h_flex()
       .id(`pane-head-${pane}`)
       .size_full()
@@ -70,8 +105,8 @@ export default class CompanyPane extends View {
       .on_click(() => run("pane.focus", { pane }))
       .child(avatar)
       .child(h_flex().flex_none().gap(7).items_center()
-        .child(div().truncate().max_w(220).font_semibold().text_color(t.foreground).child(title))
-        .child(div().flex_none().px(7).h(19).flex().items_center().rounded(5).bg("#89b4fa1f").text_size(10.5).text_color("#b4befe").child(ROLE(p))))
+        .child(edit("name", div().id(`pn-${pane}`).truncate().max_w(220).px(3).rounded(4).font_semibold().text_color(t.foreground).child(title), 170))
+        .child(edit("role", div().id(`pr-${pane}`).flex_none().px(7).h(19).flex().items_center().rounded(5).bg("#89b4fa1f").text_size(10.5).text_color("#b4befe").child(custom.role ?? ROLE(p)), 120)))
       .child(div().flex_1().truncate().text_color(t.dim).child(folder(p.cwd)))
       .when(Boolean(status), el => el.child(status))
       .when(this.hovered, el => el
